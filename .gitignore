@@ -1,0 +1,24 @@
+# .gitignore 파일 내용
+# Python 관련
+*.pyc
+__pycache__/
+.pytest_cache/
+venv/
+.venv/
+
+# 환경 변수 및 민감 정보
+.env
+config.local.py
+*secrets.py
+
+# IDE/OS 파일
+.DS_Store
+.vscode/
+.idea/
+
+# Flask 세션 파일
+instance/
+
+# 로그 파일
+*.log
+/coverage
