@@ -54,6 +54,7 @@ def signup_user():
     role = data.get('role')
     address = data.get('address')
     admin_code = data.get('admin_code')
+    store_name = data.get('store_name')
 
     if not all([user_uid, password, name, role]):
         return jsonify({"error": "필수 입력 항목이 누락되었습니다."}), 400
@@ -91,10 +92,9 @@ def signup_user():
         # 3. 역할에 따른 프로필 테이블 INSERT
         if role == 'Administrator':
             cur.execute("INSERT INTO AdminProfile (user_id) VALUES (%s)", (user_id,))
-
         elif role in ['PrimarySeller', 'Reseller']:
-            # 판매자 프로필 생성 (store_name은 선택 사항이므로 일단 NULL로 삽입)
-            cur.execute("INSERT INTO SellerProfile (user_id, grade) VALUES (%s, NULL)", (user_id,))
+            cur.execute("INSERT INTO SellerProfile (user_id, store_name, grade) VALUES (%s, %s, NULL)",
+                        (user_id, store_name))
 
         elif role == 'Buyer':
             # 구매자는 주소가 필수 (제안서 기반)
