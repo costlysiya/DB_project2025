@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}메인 | SELECT MARKET 베스트 굿즈{% endblock %}
+
+{% block content %}
+
+    <div class="product-list-header">
+        <span class="product-count">총 상품: 4개 (예시 데이터 기준)</span>
+        <div class="sorting-options">
+            <select name="sort_by">
+                <option value="latest">최신 등록순</option>
+                <option value="low_price">낮은 가격순</option>
+                <option value="high_price">높은 가격순</option>
+                <option value="rating">굿즈 등급순 (Rating)</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="product-grid">
+
+        <div class="product-card">
+            <a href="/product/1">
+                <div class="card-image" style="background-image: url('http://fileserver.com/album_official.jpg');">
+                    <span class="badge">Primary</span>
+                </div>
+            </a>
+
+            <div class="card-info">
+                <p class="category">💿 음반</p>
+                <h4 class="product-name"><a href="/product/1">아이돌 정규 앨범 1집</a></h4>
+                <p class="seller-info">공식샵A (Gold)</p>
+                <p class="product-price">35,000원</p>
+                <span class="product-rating">등급: A</span>
+            </div>
+        </div>
+
+        <div class="product-card auction">
+            <a href="/auction/4">
+                <div class="card-image" style="background-image: url('');">
+                    <span class="badge resale">Resale</span>
+                </div>
+            </a>
+            <div class="card-info">
+                <p class="category">🤖 피규어</p>
+                <h4 class="product-name"><a href="/auction/4">한정판 캐릭터 피규어</a></h4>
+                <p class="seller-info">박리셀러 (Silver)</p>
+                <p class="product-price auction-price">현재가: 200,000원</p>
+                <span class="status-tag">🔥 경매 중</span>
+            </div>
+        </div>
+
+        <div class="product-card">
+            <a href="/product/3">
+                <div class="card-image" style="background-image: url('http://fileserver.com/resell/album_real_01.jpg');">
+                    <span class="badge resale">Resale</span>
+                </div>
+            </a>
+            </a>
+            <div class="card-info">
+                <p class="category">💿 음반</p>
+                <h4 class="product-name"><a href="/product/3">아이돌 정규 앨범 1집 (리셀)</a></h4>
+                <p class="seller-info">박리셀러 (Silver)</p>
+                <p class="product-price">50,000원</p>
+                <span class="product-condition">상태: 최상</span>
+            </div>
+        </div>
+
+        <div class="product-card sold-out">
+            <a href="/product/2">
+                <div class="card-image" style="background-image: url('http://fileserver.com/figure_official.jpg');">
+                    <span class="badge primary">Primary</span>
+                </div>
+            </a>
+            <div class="card-info">
+                <p class="category">🤖 피규어</p>
+                <h4 class="product-name"><a href="/product/2">한정판 캐릭터 피규어</a></h4>
+                <p class="seller-info">공식샵A (Gold)</p>
+                <p class="product-price">150,000원</p>
+                <span class="status-tag">🚫 품절</span>
+            </div>
+        </div>
+
+    </div>
+{% endblock %}

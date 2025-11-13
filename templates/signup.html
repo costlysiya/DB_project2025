@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+
+{% block title %}회원가입 | SELECT MARKET{% endblock %}
+
+{% block content %}
+    <div class="form-container wide">
+        <h2>SELECT MARKET 회원가입</h2>
+        <p class="subtitle">서비스 이용을 위해 역할을 선택하고 정보를 입력해주세요.</p>
+        
+        <!-- 1. HTML Form 수정: action과 method 속성을 제거하여 JS가 제어하도록 함 -->
+        <form id="signupForm">
+
+            <fieldset class="role-selection">
+                <legend>✅ 사용자 역할 선택</legend>
+                <label>
+                    <input type="radio" name="role" value="Buyer" id="role_buyer" required checked>
+                    구매자 (Buyer)
+                </label>
+
+                <label>
+                    <input type="radio" name="role" value="PrimarySeller" id="role_primary_seller" required>
+                    1차 판매자 (Primary Seller)
+                </label>
+
+                <label>
+                    <input type="radio" name="role" value="Reseller" id="role_reseller" required>
+                    2차 판매자 (Reseller)
+                </label>
+
+                <label>
+                    <input type="radio" name="role" value="Administrator" id="role_admin" required>
+                    관리자 (Administrator)
+                </label>
+
+            </fieldset>
+
+            <hr>
+
+            <!-- 필수 공통 정보 -->
+            <div class="form-group-section">
+                <h3>필수 공통 정보</h3>
+                <div class="form-group">
+                    <label for="uid">아이디 (로그인 ID) <span class="required">*</span></label>
+                    <input type="text" id="uid" name="user_uid" placeholder="5~20자 영문/숫자" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="password">비밀번호 <span class="required">*</span></label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="name">이름/활동명 <span class="required">*</span></label>
+                    <input type="text" id="name" name="name" required>
+                </div>
+            </div>
+
+            <hr>
+
+            <div id="role-specific-fields">
+                <div id="fields_buyer" class="role-fields active">
+                    <h3>구매자 추가 정보</h3>
+                    <div class="form-group">
+                        <label for="address">배송 주소</label>
+                        <input type="text" id="address" name="address" placeholder="주소를 입력해주세요 (BuyerProfile)">
+                    </div>
+                </div>
+
+                <div id="fields_seller" class="role-fields hidden">
+                    <h3>판매자 추가 정보</h3>
+                    <p class="note">⚠️ 상점명은 마이페이지에서도 지정 가능합니다.</p>
+                    <div class="form-group">
+                        <!-- name="store_name" 추가 (Flask 코드에 사용되진 않지만 DB에 필요할 수 있음) -->
+                        <label for="store_name">상점명 (Seller 전용)</label>
+                        <input type="text" id="store_name" name="store_name" placeholder="상점명을 입력하세요 (SellerProfile)">
+                    </div>
+                </div>
+
+                <div id="fields_admin" class="role-fields hidden">
+                    <h3>관리자 인증</h3>
+                    <p class="note">❗ 관리자 계정은 특별 인증이 필요합니다.</p>
+                    <div class="form-group">
+                        <!-- name="auth_code" -> name="admin_code"로 변경 (Flask 코드와 일치) -->
+                        <label for="auth_code">인증번호 <span class="required">*</span></label>
+                        <input type="text" id="auth_code" name="admin_code" required placeholder="관리자 전용 인증번호를 입력하세요">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 메시지 표시 공간 추가 -->
+            <p id="message-area" style="color: red; margin-top: 10px; font-weight: bold;"></p>
+
+            <button type="submit" class="btn full-width submit-btn">회원가입 완료</button>
+        </form>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const roleRadios = document.querySelectorAll('input[name="role"]');
+            const form = document.getElementById('signupForm');
+            const messageArea = document.getElementById('message-area');
+
+            // ... (기존 toggleFields 함수는 그대로 유지) ...
+            const buyerFields = document.getElementById('fields_buyer');
+            const sellerFields = document.getElementById('fields_seller');
+            const adminFields = document.getElementById('fields_admin');
+
+            function toggleFields() {
+                const selectedRole = document.querySelector('input[name="role"]:checked').value;
+
+                // 모든 필드 숨기기
+                document.querySelectorAll('.role-fields').forEach(el => {
+                    el.classList.remove('active');
+                    el.classList.add('hidden');
+                    el.querySelectorAll('input').forEach(input => input.removeAttribute('required'));
+                });
+
+                if (selectedRole === 'Buyer') {
+                    buyerFields.classList.add('active');
+                    buyerFields.classList.remove('hidden');
+                    buyerFields.querySelector('#address').setAttribute('required', 'required');
+                } else if (selectedRole === 'PrimarySeller' || selectedRole === 'Reseller') {
+                    sellerFields.classList.add('active');
+                    sellerFields.classList.remove('hidden');
+                } else if (selectedRole === 'Administrator') {
+                    adminFields.classList.add('active');
+                    adminFields.classList.remove('hidden');
+                    adminFields.querySelector('input[name="admin_code"]').setAttribute('required', 'required');
+                }
+            }
+
+            roleRadios.forEach(radio => radio.addEventListener('change', toggleFields));
+            toggleFields(); // 초기 로드 시 한 번 실행
+
+
+            // 2. 폼 제출 (AJAX/FETCH) 로직 추가
+            form.addEventListener('submit', function(event) {
+                event.preventDefault(); // 기본 폼 제출 방지 (가장 중요)
+
+                messageArea.textContent = '회원가입 요청 중...';
+                messageArea.style.color = 'gray';
+
+                const selectedRole = document.querySelector('input[name="role"]:checked').value;
+
+                // 폼 데이터 수집
+                const signupData = {
+                    user_uid: document.querySelector('input[name="user_uid"]').value,
+                    password: document.querySelector('input[name="password"]').value,
+                    name: document.querySelector('input[name="name"]').value,
+                    role: selectedRole,
+
+                    // 역할별 필드 값 수집
+                    address: selectedRole === 'Buyer' ? document.querySelector('input[name="address"]').value : null,
+                    admin_code: selectedRole === 'Administrator' ? document.querySelector('input[name="admin_code"]').value : null,
+                    // store_name은 선택 사항이므로 JSON에 포함해도 무방하지만 여기서는 필수로 필요한 것만 보냄
+                };
+
+                // Flask API (POST /signup) 호출
+                fetch('/api/signup', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(signupData)
+                })
+                .then(response => {
+                    return response.json().then(data => {
+                        if (!response.ok) {
+                            // 400, 403, 409, 500 등 오류일 때 메시지를 추출하여 반환
+                            const errorMsg = data.message || data.error || "알 수 없는 오류 (API 응답 실패)";
+                            messageArea.style.color = 'red';
+                            return Promise.reject(new Error(errorMsg));
+                        }
+                        return data; // 201 Created 시 성공 데이터 반환
+                    });
+                })
+                .then(data => {
+                    // 회원가입 성공 처리
+                    messageArea.textContent = data.message + " 로그인 페이지로 이동합니다.";
+                    messageArea.style.color = 'green';
+
+                    alert(data.message + " 아이디: " + signupData.user_uid);
+
+                    // 성공 후 로그인 페이지로 리다이렉트
+                    setTimeout(() => {
+                        window.location.href = '/login';
+                    }, 1500); // 1.5초 후 이동
+                })
+                .catch(error => {
+                    // 회원가입 실패 처리
+                    const displayMsg = error.message;
+                    messageArea.textContent = displayMsg;
+                    messageArea.style.color = 'red';
+
+                    alert("회원가입 실패: " + displayMsg);
+                });
+            });
+        });
+    </script>
+{% endblock %}
