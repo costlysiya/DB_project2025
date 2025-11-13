@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}마이페이지 | 셀렉트 마켓{% endblock %}
+
+{% block content %}
+    
+    <h2>마이페이지</h2>
+    
+    <div class="user-welcome-section">
+        <p><strong>{{ user.name }}</strong>님, 환영합니다! (역할: <span class="user-role">{{ user.role }}</span>)</p>
+        <p>
+            {% if user.role == 'Buyer' %}
+                현재 배송 주소: {{ buyer_profile.address }}
+            {% elif user.role == 'PrimarySeller' or user.role == 'Reseller' %}
+                판매자 등급: <span class="seller-grade-badge">{{ seller_profile.grade }}</span>
+            {% endif %}
+        </p>
+    </div>
+
+    <div class="mypage-dashboard">
+        
+        <nav class="mypage-sidebar">
+            <ul>
+                <li class="menu-title">계정 및 쇼핑</li>
+                <li><a href="/mypage/profile">정보 수정</a></li>
+                {% if user.role == 'Buyer' %}
+                <li><a href="/mypage/orders">📦 주문/배송 내역 조회</a></li>
+                <li><a href="/mypage/disputes">📞 분쟁 처리 현황</a></li> <li><a href="/mypage/feedback/write">⭐ 판매자 평가 남기기</a></li>
+                {% endif %}
+                
+                {% if user.role == 'PrimarySeller' or user.role == 'Reseller' %}
+                <li class="menu-title">판매 관리 기능</li>
+                <li><a href="/seller/listing">📈 상품/재고 관리</a></li> <li><a href="/seller/sales">💰 매출 통계 확인</a></li>
+                <li><a href="/seller/evaluation">⭐ 받은 평가 보기</a></li> {% endif %}
+
+                {% if user.role == 'Administrator' %}
+                <li class="menu-title">관리자 기능</li>
+                <li><a href="/admin/rating">💎 굿즈 등급 부여</a></li> <li><a href="/admin/disputes">📝 분쟁 조정 (환불/교환)</a></li> <li><a href="/admin/seller_eval">🏆 판매자 평가 관리</a></li> {% endif %}
+                
+            </ul>
+        </nav>
+        
+        <div class="mypage-content">
+            <h3>최근 활동 요약</h3>
+            {% if user.role == 'Buyer' %}
+            <p>최근 주문: 아이돌 정규 앨범 1집 (상태: 배송 완료)</p>
+            <a href="/mypage/orders" class="btn primary-btn">전체 주문 내역 보기</a>
+            {% else %}
+            <p>총 판매 건수: 12건</p>
+            <p>평균 평가 점수: 4.9점</p>
+            <a href="/seller/sales" class="btn primary-btn">판매 대시보드 바로가기</a>
+            {% endif %}
+        </div>
+    </div>
+{% endblock %}

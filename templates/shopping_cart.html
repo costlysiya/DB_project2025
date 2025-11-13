@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}장바구니 | 셀렉트 마켓{% endblock %}
+
+{% block content %}
+    
+    <h2>🛒 나의 장바구니</h2>
+    
+    <div class="cart-content">
+        
+        <form action="/update_cart" method="POST" id="cart-form">
+            <table class="cart-table">
+                <thead>
+                    <tr>
+                        <th class="col-check"><input type="checkbox" id="check_all"></th>
+                        <th class="col-product">상품 정보</th>
+                        <th class="col-price">가격</th>
+                        <th class="col-qty">수량</th>
+                        <th class="col-total">주문 금액</th>
+                        <th class="col-delete">삭제</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr data-cart-id="1">
+                        <td class="col-check"><input type="checkbox" name="selected_items" value="1" checked></td>
+                        <td class="col-product">
+                            <div class="product-info-cart">
+                                
+                                <div>
+                                    <a href="/product/1">아이돌 정규 앨범 1집</a>
+                                    <span class="badge primary">Primary</span>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="col-price">35,000원</td>
+                        <td class="col-qty">
+                            <input type="number" name="quantity_1" value="1" min="1" class="qty-input">
+                        </td>
+                        <td class="col-total item-total">35,000원</td>
+                        <td class="col-delete">
+                            <button type="button" class="btn-delete" data-cart-id="1">✖</button>
+                        </td>
+                    </tr>
+                    
+                    <tr data-cart-id="2">
+                        <td class="col-check"><input type="checkbox" name="selected_items" value="2" checked></td>
+                        <td class="col-product">
+                            <div class="product-info-cart">
+                                
+                                <div>
+                                    <a href="/product/3">한정판 캐릭터 피규어 (리셀/미개봉)</a>
+                                    <span class="badge resale">Resale</span>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="col-price">200,000원</td>
+                        <td class="col-qty">
+                            <input type="number" name="quantity_2" value="1" min="1" class="qty-input">
+                        </td>
+                        <td class="col-total item-total">200,000원</td>
+                        <td class="col-delete">
+                            <button type="button" class="btn-delete" data-cart-id="2">✖</button>
+                        </td>
+                    </tr>
+                    
+                </tbody>
+            </table>
+            
+            <div class="cart-actions">
+                <button type="submit" class="btn secondary-btn">선택 상품 수량 변경</button>
+            </div>
+        </form>
+    </div>
+    
+    <div class="cart-summary">
+        <h3>결제 예정 금액</h3>
+        <div class="summary-line">
+            <span>총 상품 금액</span>
+            <span class="summary-value">235,000원</span>
+        </div>
+        <div class="summary-line">
+            <span>배송비</span>
+            <span class="summary-value">+ 3,000원</span>
+        </div>
+        <div class="summary-line total">
+            <span>최종 결제 금액</span>
+            <span class="summary-value final-total">238,000원</span>
+        </div>
+        
+        <button type="button" class="btn primary-btn order-btn">선택 상품 주문하기 (Order)</button>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const checkAll = document.getElementById('check_all');
+            const itemChecks = document.querySelectorAll('input[name="selected_items"]');
+
+            checkAll.addEventListener('change', function() {
+                itemChecks.forEach(checkbox => checkbox.checked = checkAll.checked);
+            });
+            
+            // TODO: 수량 변경 시 item-total 및 summary-value 업데이트 로직 추가
+        });
+    </script>
+{% endblock %}

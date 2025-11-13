@@ -170,45 +170,6 @@ def login_user():
             conn.close()
         return jsonify({"error": f"로그인 중 오류 발생: {str(e)}"}), 500
 
-# 데이터베이스 연결 확인 코드
-@app.route('/test_db_connection', methods=['GET'])
-def test_db_connection():
-    conn = get_db_connection()
-
-    if conn is None:
-        # get_db_connection 함수에서 이미 오류 메시지를 출력했지만,
-        # API 응답으로도 실패를 명확히 알림
-        return jsonify({
-            "status": "FAIL",
-            "message": "데이터베이스 연결에 실패했습니다. (host, port, user, password, dbname 확인 필요)"
-        }), 500
-
-    try:
-        # 간단한 쿼리를 실행하여 실제 통신이 되는지 확인
-        cur = conn.cursor()
-        cur.execute("SELECT 1")
-        result = cur.fetchone()
-
-        if result and result[0] == 1:
-            conn.close()
-            return jsonify({
-                "status": "SUCCESS",
-                "message": "데이터베이스 연결 및 기본 쿼리 테스트 성공!"
-            }), 200
-        else:
-            conn.close()
-            return jsonify({
-                "status": "FAIL",
-                "message": "연결은 되었으나 기본 쿼리 실행에 문제가 있습니다."
-            }), 500
-
-    except Exception as e:
-        # 쿼리 실행 중 발생한 예외 처리
-        conn.close()
-        return jsonify({
-            "status": "ERROR",
-            "message": f"DB 쿼리 실행 중 예외 발생: {str(e)}"
-        }), 500
 
 if __name__ == '__main__':
     # 디버그 모드를 켜고 실행
