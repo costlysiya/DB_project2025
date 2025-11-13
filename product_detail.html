@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}상품 상세 | {{ product.name }} | 셀렉트 마켓{% endblock %}
+
+{% block content %}
+
+    <div class="product-detail-container">
+        
+        <div class="image-gallery">
+            <img src="{{ product.main_image_url }}" alt="{{ product.name }}" class="main-image">
+            
+            <div class="thumbnail-list">
+                <img src="http://fileserver.com/resell/album_real_01.jpg" alt="썸네일1">
+                <img src="http://fileserver.com/resell/album_real_02.jpg" alt="썸네일2">
+                </div>
+        </div>
+        
+        <div class="product-info-box">
+            
+            <p class="category-path">홈 > {{ product.category }} > {{ product.name }}</p>
+            <h1>{{ product.name }}</h1>
+            <p class="description">{{ product.description }}</p>
+            
+            <hr>
+
+            <div class="price-section">
+                <span class="label">판매 가격</span>
+                <span class="price-value">{{ listing.price | number_format }}원</span>
+            </div>
+            
+            <div class="seller-section">
+                <span class="label">판매자</span>
+                <span class="seller-name">{{ seller.name }} ({{ seller.store_name }})</span>
+                <span class="seller-grade">등급: {{ seller.grade }} </span>
+            </div>
+            
+            <div class="detail-section">
+                <p><strong>굿즈 등급 (인기도):</strong> <span class="rating-value">{{ product.rating }}</span></p>
+                <p><strong>판매 형태:</strong> <span class="listing-type-value">{{ listing.listing_type }}</span></p>
+                {% if listing.condition %}
+                <p><strong>상품 상태:</strong> <span>{{ listing.condition }}</span></p>
+                {% endif %}
+                <p><strong>남은 재고:</strong> <span class="stock-value">{{ listing.stock }}개</span></p>
+            </div>
+            
+            <hr>
+
+            <form action="/add_to_cart" method="POST" class="purchase-form">
+                <input type="hidden" name="listing_id" value="{{ listing.listing_id }}">
+                
+                <div class="quantity-selector">
+                    <label for="quantity">구매 수량</label>
+                    <input type="number" id="quantity" name="quantity" value="1" min="1" max="{{ listing.stock }}" required>
+                </div>
+
+                <div class="total-price">
+                    총 결제 금액: 
+                    <span id="final-price">{{ listing.price | number_format }}원</span>
+                </div>
+                
+                <div class="action-buttons">
+                    <button type="submit" class="btn primary-btn cart-btn">🛒 장바구니 담기</button>
+                    <button type="button" class="btn secondary-btn buy-btn">바로 구매</button>
+                </div>
+            </form>
+
+        </div>
+    </div>
+    
+    <div class="product-tabs">
+        <h2>사용자 피드백 ({{ feedback_count }}개)</h2>
+        <div class="feedback-list">
+            <p><strong>김구매자 (평점 5점):</strong> 공식 판매자 배송 빠르고 안전합니다.</p>
+        </div>
+    </div>
+
+{% endblock %}

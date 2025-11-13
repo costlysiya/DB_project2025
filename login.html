@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}로그인 | SELECT MARKET{% endblock %}
+
+{% block content %}
+    <div class="form-container">
+        <h2>사용자 로그인</h2>
+
+        <form action="/login" method="POST">
+
+            <div class="form-group">
+                <label for="username">아이디 (User ID)</label>
+                <input type="text" id="username" name="username" placeholder="아이디를 입력하세요" required>
+            </div>
+
+            <div class="form-group">
+                <label for="password">비밀번호</label>
+                <input type="password" id="password" name="password" placeholder="비밀번호를 입력하세요" required>
+            </div>
+
+            <button type="submit" class="btn full-width">로그인</button>
+        </form>
+
+        <p class="signup-link">
+            계정이 없으신가요?
+            <a href="/signup">회원가입</a>
+        </p>
+
+    </div>
+{% endblock %}
