@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}셀렉트 마켓{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='static.css') }}">
+    </head>
+<body>
+    <div class="top-header">
+        <div class="container top-menu-container">
+            <div class="auth-links">
+                <a href="/login">로그인</a> |
+                <a href="/signup">회원가입</a> |
+                <a href="/mypage">마이페이지</a>
+            </div>
+            <form action="/search" method="GET" class="search-form">
+                <input type="text" name="query" placeholder="상품 검색">
+                <button type="submit" class="search-btn">🔍</button>
+            </form>
+            <a href="/cart" class="cart-icon">🛒 <span class="cart-count">0</span></a>
+        </div>
+    </div>
+
+    <header class="main-header">
+        <div class="container">
+            <h1><a href="/">🧸 SELECT MARKET</a></h1>
+        </div>
+    </header>
+
+    <nav class="category-nav">
+        <div class="container">
+            <ul>
+                <li><a href="/category/all">전체 상품</a></li>
+                <li><a href="/category/음반">💿 음반</a></li>
+                <li><a href="/category/피규어">🤖 피규어</a></li>
+                <li><a href="/category/인형">🧸 인형</a></li>
+                <li><a href="/category/아크릴">✨ 아크릴</a></li>
+                <li><a href="/category/응원도구">📣 응원도구</a></li>
+                <li><a href="/category/포카">🖼️ 포카</a></li>
+                <li><a href="/category/의류">👚 의류</a></li>
+                <li><a href="/category/기타">🎁 기타</a></li>
+                <li class="special-menu"><a href="/resale/auction">🔥 경매 / 리셀</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>고객센터: 1588-XXXX | 이메일: db_project@goodsmarket.com</p>
+            <p>&copy; 2025 Goods Sales and Resale Management System</p>
+        </div>
+    </footer>
+</body>
+</html>
