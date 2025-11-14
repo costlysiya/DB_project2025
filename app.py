@@ -16,8 +16,8 @@ def get_db_connection():
         conn = psycopg2.connect(
             host="127.0.0.1",  #로컬 테스트, (외부 접속 시 실제 IP)
             database="project2025",
-            user="db2025",
-            password="db!2025",
+            user="postgres",
+            password="202255506",
             port="5432"
         )
         return conn
@@ -25,11 +25,61 @@ def get_db_connection():
         print(f"DB 연결 오류: {e}")
         return None
 
+# app.py 파일 상단 (기존 get_db_connection 함수 바로 아래에 추가)
 
+# DB 연결 상태를 확인하는 함수
+def check_db_connection():
+    """ 데이터베이스 연결을 시도하고 성공 여부를 반환합니다. """
+    conn = get_db_connection()
+    if conn:
+        try:
+            # 연결이 성공하면 닫고 True 반환
+            conn.close()
+            return True
+        except Exception as e:
+            # 연결은 되었지만, 닫는 과정에서 문제 발생 시 (거의 없음)
+            print(f"DB 연결 테스트 중 오류 발생: {e}")
+            return False
+    # get_db_connection에서 이미 오류 출력
+    return False
+
+# ----------------------------------------------------------------------
 # 테스트용 API 엔드포인트
+# ----------------------------------------------------------------------
 @app.route('/')
 def home():
     return "Goods Sales and Resale System API is Running!"
+
+
+# 기존 '/' 라우트 아래에 추가
+
+@app.route('/api/db-check')
+def db_check():
+    """ 웹 브라우저에서 DB 연결 상태를 확인하는 라우트 """
+    if check_db_connection():
+        # 연결 성공 시
+        return jsonify({
+            "status": "success",
+            "message": "데이터베이스 연결이 정상적으로 확인되었습니다.",
+            "db_info": {
+                "user": "db2025",
+                "database": "project2025"
+            }
+        }), 200
+    else:
+        # 연결 실패 시
+        return jsonify({
+            "status": "failure",
+            "message": "데이터베이스 연결에 실패했습니다. (HOST, PORT, USER, PASSWORD, 권한 확인 필요)",
+            "error_detail": "DB 연결 오류 로그를 콘솔에서 확인하세요."
+        }), 500
+
+
+# ... (나머지 기존 라우팅 코드)
+
+
+# 테스트용 API 엔드포인트
+
 
 #로그인 페이지 라우터
 @app.route('/login', methods=['GET'])
