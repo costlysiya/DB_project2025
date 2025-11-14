@@ -152,8 +152,9 @@
                     // 역할별 필드 값 수집
                     address: selectedRole === 'Buyer' ? document.querySelector('input[name="address"]').value : null,
                     admin_code: selectedRole === 'Administrator' ? document.querySelector('input[name="admin_code"]').value : null,
-                    // store_name은 선택 사항이므로 JSON에 포함해도 무방하지만 여기서는 필수로 필요한 것만 보냄
-                };
+                    store_name: (selectedRole === 'PrimarySeller' || selectedRole === 'Reseller')
+                                ? document.querySelector('input[name="store_name"]').value : null,
+                    };
 
                 // Flask API (POST /signup) 호출
                 fetch('/api/signup', {
