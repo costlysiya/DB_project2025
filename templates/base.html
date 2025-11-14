@@ -10,15 +10,29 @@
     <div class="top-header">
         <div class="container top-menu-container">
             <div class="auth-links">
-                <a href="/login">로그인</a> |
-                <a href="/signup">회원가입</a> |
-                <a href="/mypage">마이페이지</a>
+                {% if session.user_id %}
+                    <span>{{ session.user_name }}님</span> |
+                    <a href="{{ url_for('logout_user') }}">로그아웃</a> |
+                    <a href="/mypage">마이페이지</a>
+                {% else %}
+                    <a href="{{ url_for('show_login_page') }}">로그인</a> |
+                    <a href="{{ url_for('show_signup_page') }}">회원가입</a>
+                {% endif %}
             </div>
-            <form action="/search" method="GET" class="search-form">
-                <input type="text" name="query" placeholder="상품 검색">
+            <form action="{{ url_for('search_products') }}" method="GET" class="search-form">
+                <input type="text" name="query" placeholder="상품 검색" value="{{ request.args.get('query', '') }}">
                 <button type="submit" class="search-btn">🔍</button>
             </form>
-            <a href="/cart" class="cart-icon">🛒 <span class="cart-count">0</span></a>
+            <div class="action-icon-group">
+                {% if session.user_role in ['PrimarySeller', 'Reseller'] %}
+                    <!-- (★수정) app.py에 정의된 라우터로 변경 -->
+                    <a href="{{ url_for('show_product_register_page') }}" class="seller-icon">🛍️ 상품 등록</a>
+                {% elif session.user_role == 'Buyer' or not session.user_id %}
+                    <a href="/cart" class="cart-icon">🛒 <span class="cart-count">{{ session.cart_count | default(0) }}</span></a>
+                {% elif session.user_role == 'Administrator' %}
+                     <a href="/admin/dashboard">관리자모드</a>
+                {% endif %}
+            </div>
         </div>
     </div>
 
@@ -31,7 +45,7 @@
     <nav class="category-nav">
         <div class="container">
             <ul>
-                <li><a href="/category/all">전체 상품</a></li>
+                <li><a href="/">전체 상품</a></li>
                 <li><a href="/category/음반">💿 음반</a></li>
                 <li><a href="/category/피규어">🤖 피규어</a></li>
                 <li><a href="/category/인형">🧸 인형</a></li>

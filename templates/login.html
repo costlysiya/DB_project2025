@@ -75,8 +75,8 @@
 
                     alert("로그인 성공: " + successMsg);
 
-                    // TODO: 성공 후 메인 페이지 또는 역할별 대시보드로 이동
-                    window.location.href = '/products';
+                    // 성공 후 메인 페이지 이동
+                    window.location.href = '/';
                 })
                 .catch(error => {
                     // 로그인 실패 처리 (401 Unauthorized 등)
