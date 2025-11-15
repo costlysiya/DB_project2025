@@ -1,199 +1,77 @@
 {% extends "base.html" %}
 
-<!-- product.name이 없을 경우를 대비해 기본값 추가 -->
-{% block title %}상품 상세 | {{ product.name | default('상품 없음', true) }} | 셀렉트 마켓{% endblock %}
+{% block title %}상품 상세 | {{ product.name }} | 셀렉트 마켓{% endblock %}
 
 {% block content %}
 
-    <!-- 상품 정보가 없는 경우 404 메시지 표시 -->
-    {% if not product or not listing %}
-        <h2>상품을 찾을 수 없습니다 (404)</h2>
-        <p>요청하신 상품(Listing ID: {{ listing_id }})이 존재하지 않거나 삭제되었습니다.</p>
-        <a href="/">홈으로 돌아가기</a>
-
-    {% else %}
-    <!-- 상품 정보가 있을 경우 상세 페이지 표시 -->
     <div class="product-detail-container">
-
+        
         <div class="image-gallery">
-            <!-- Product의 대표 이미지(image_url)를 메인 이미지로 사용 -->
-            <img src="{{ product.image_url | default('https://placehold.co/600x600/eee/ccc?text=No+Image', true) }}" alt="{{ product.name }}" class="main-image">
-
-            <!--
-            2차 판매자의 실물 사진 (ListingImage)이 있으면 썸네일로 표시
-            1차 판매자(Primary)는 이 리스트가 비어있음
-            -->
-            {% if resale_images %}
+            <img src="{{ product.main_image_url }}" alt="{{ product.name }}" class="main-image">
+            
             <div class="thumbnail-list">
-                <!--  썸네일 클릭 시 메인 이미지 변경 JS 추가 -->
-                {% for img in resale_images %}
-                <img src="{{ img.image_url }}" alt="실물 사진 썸네일" onclick="document.querySelector('.main-image').src='{{ img.image_url }}'">
-                {% endfor %}
-            </div>
-            {% endif %}
+                <img src="http://fileserver.com/resell/album_real_01.jpg" alt="썸네일1">
+                <img src="http://fileserver.com/resell/album_real_02.jpg" alt="썸네일2">
+                </div>
         </div>
-
+        
         <div class="product-info-box">
-            <p class="category-path">홈 > {{ product.category }}</p>
+            
+            <p class="category-path">홈 > {{ product.category }} > {{ product.name }}</p>
             <h1>{{ product.name }}</h1>
-            <p class="description">{{ product.description | default('상세 설명이 없습니다.', true) }}</p>
-
+            <p class="description">{{ product.description }}</p>
+            
             <hr>
 
             <div class="price-section">
-                <span class="label">
-                    {% if listing.listing_type == 'Resale' and listing.status in ['경매 중', '경매 예정'] %}
-                        현재 경매가
-                    {% else %}
-                        판매 가격
-                    {% endif %}
-                </span>
-                <span class="price-value">{{ "{:,.0f}원".format(listing.price) }}</span>
+                <span class="label">판매 가격</span>
+                <span class="price-value">{{ listing.price | number_format }}원</span>
             </div>
-
+            
             <div class="seller-section">
                 <span class="label">판매자</span>
-                <span class="seller-name">
-                    {{ seller.store_name if seller.store_name else seller.seller_name }}
-                </span>
-                <span class="seller-grade">등급: {{ seller.seller_grade | default('N/A', true) }} </span>
+                <span class="seller-name">{{ seller.name }} ({{ seller.store_name }})</span>
+                <span class="seller-grade">등급: {{ seller.grade }} </span>
             </div>
-
+            
             <div class="detail-section">
-                <p><strong>판매 형태:</strong> <span class="listing-type-value">{{ '1차 판매' if listing.listing_type == 'Primary' else '2차 판매 (Resale)' }}</span></p>
+                <p><strong>굿즈 등급 (인기도):</strong> <span class="rating-value">{{ product.rating }}</span></p>
+                <p><strong>판매 형태:</strong> <span class="listing-type-value">{{ listing.listing_type }}</span></p>
                 {% if listing.condition %}
                 <p><strong>상품 상태:</strong> <span>{{ listing.condition }}</span></p>
                 {% endif %}
                 <p><strong>남은 재고:</strong> <span class="stock-value">{{ listing.stock }}개</span></p>
             </div>
-
+            
             <hr>
 
-            <!-- 재고가 없거나 경매 중일 때 구매 폼 비활성화 -->
-            {% if listing.stock == 0 or listing.status == '품절' %}
-                <div class="purchase-form" style="background-color: #f5f5f5;">
-                    <h3 style="text-align: center; color: #dc3545;">🚫 품절된 상품입니다.</h3>
-                </div>
-            {% elif listing.status in ['경매 중', '경매 예정'] %}
-                 <div class="purchase-form" style="background-color: #fcf8e3;">
-                    <h3 style="text-align: center; color: #f57f17;">🔥 경매가 진행 중인 상품입니다.</h3>
-                    <p style="text-align: center;">입찰을 통해 참여해주세요.</p>
-                    <!-- 입찰 버튼 (id는 auction_id가 필요함 -> 추가 쿼리 필요) -->
-                    <button type="button" class="btn secondary-btn" style="width: 100%;" onclick="alert('입찰 기능 구현 필요')">입찰하기</button>
-                 </div>
-            {% else %}
-            <!--  재고가 있을 때만 구매 폼 활성화 -->
-            <form id="cart-form" class="purchase-form">
+            <form action="/add_to_cart" method="POST" class="purchase-form">
                 <input type="hidden" name="listing_id" value="{{ listing.listing_id }}">
-
+                
                 <div class="quantity-selector">
                     <label for="quantity">구매 수량</label>
-                    <input type="number" id="quantity" name="quantity" value="1" min="1" max="{{ listing.stock }}" required onchange="updateTotalPrice()">
+                    <input type="number" id="quantity" name="quantity" value="1" min="1" max="{{ listing.stock }}" required>
                 </div>
 
                 <div class="total-price">
-                    총 결제 금액:
-                    <span id="final-price">{{ "{:,.0f}원".format(listing.price) }}</span>
+                    총 결제 금액: 
+                    <span id="final-price">{{ listing.price | number_format }}원</span>
                 </div>
-
+                
                 <div class="action-buttons">
                     <button type="submit" class="btn primary-btn cart-btn">🛒 장바구니 담기</button>
-                    <button type="button" class="btn secondary-btn buy-btn" onclick="alert('바로 구매 기능 구현 필요')">바로 구매</button>
+                    <button type="button" class="btn secondary-btn buy-btn">바로 구매</button>
                 </div>
-                <!-- AJAX 응답 메시지 표시 영역 -->
-                <div id="cart-message" style="text-align: center; margin-top: 10px; font-weight: bold;"></div>
             </form>
-            {% endif %}
 
         </div>
     </div>
-
-    <script>
-        // 수량 변경 시 총 결제 금액 실시간 업데이트
-        // listing.price가 0이거나 없을 경우를 대비
-        const basePrice = {{ listing.price | default(0) }};
-        const stock = {{ listing.stock | default(0) }};
-        const quantityInput = document.getElementById('quantity');
-        const finalPriceEl = document.getElementById('final-price');
-
-        function updateTotalPrice() {
-            // quantityInput이 없을 수도 있으므로 (품절/경매 시)
-            if (!quantityInput) return;
-
-            //수량 1이상 재고 이하로 맞춰줌
-            let quantity = parseInt(quantityInput.value, 10);
-
-            if (isNaN(quantity) || quantity < 1) {
-                quantity = 1;
-                quantityInput.value = 1;
-            }
-            if (quantity > stock) {
-                quantity = stock;
-                quantityInput.value = stock;
-            }
-
-            const totalPrice = basePrice * quantity;
-            //  JS에서 쉼표 포맷팅 (toLocalString)
-            finalPriceEl.textContent = totalPrice.toLocaleString('ko-KR') + '원';
-        }
-
-        //  장바구니 담기 AJAX
-        const cartForm = document.getElementById('cart-form');
-        const cartMessage = document.getElementById('cart-message');
-
-        if (cartForm) {
-            cartForm.addEventListener('submit', async function(event) {
-                event.preventDefault(); // 기본 폼 제출(새로고침) 방지
-
-                const data = {
-                    listing_id: {{ listing.listing_id }},
-                    quantity: parseInt(quantityInput.value, 10)
-                };
-
-                cartMessage.textContent = '처리 중...';
-                cartMessage.style.color = 'gray';
-
-                try {
-                    // '/api/cart/add' API 호출
-                    const response = await fetch('/api/cart/add', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(data)
-                    });
-
-                    const result = await response.json();
-
-                    if (response.ok) {
-                        cartMessage.textContent = result.message;
-                        cartMessage.style.color = '#ff69b4'; // style.css 핑크색
-                    } else {
-                        cartMessage.textContent = `오류: ${result.error || result.message}`;
-                        cartMessage.style.color = '#dc3545'; // style.css 빨간색
-                    }
-
-                } catch (error) {
-                    cartMessage.textContent = '네트워크 오류가 발생했습니다.';
-                    cartMessage.style.color = '#dc3545';
-                }
-            });
-        }
-    </script>
-
-    <style>
-        /*  썸네일 클릭 가능하도록 커서 변경 및 스타일 조정 */
-        .thumbnail-list img {
-            width: 80px;
-            height: 80px;
-            object-fit: cover; /*  이미지 비율 유지 */
-            cursor: pointer;
-            border: 2px solid transparent;
-            border-radius: 4px;
-            transition: border-color 0.2s;
-        }
-        .thumbnail-list img:hover {
-            border-color: #ff69b4; /* style.css 핑크색 */
-        }
-    </style>
-    {% endif %} <!--  if not product ... else ... end -->
+    
+    <div class="product-tabs">
+        <h2>사용자 피드백 ({{ feedback_count }}개)</h2>
+        <div class="feedback-list">
+            <p><strong>김구매자 (평점 5점):</strong> 공식 판매자 배송 빠르고 안전합니다.</p>
+        </div>
+    </div>
 
 {% endblock %}
