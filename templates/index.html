@@ -5,9 +5,7 @@
 {% block content %}
 
     <div class="product-list-header">
-        <!-- 상품 개수를 동적으로 표시 -->
-        <span class="product-count">총 상품: {{ product_count }}개</span>
-
+        <span class="product-count">총 상품: 4개 (예시 데이터 기준)</span>
         <div class="sorting-options">
             <select name="sort_by">
                 <option value="latest">최신 등록순</option>
@@ -18,72 +16,69 @@
         </div>
     </div>
 
-    <!-- 상품 그리드를 for 루프로 동적 생성 -->
     <div class="product-grid">
 
-        <!-- products 리스트가 비어있을 경우 메시지 표시 -->
-        {% if not products %}
-            <div style="text-align: center; grid-column: 1 / -1; padding: 40px;">
-                <p>표시할 상품이 없습니다.</p>
-            </div>
-        {% endif %}
-
-        <!-- products 리스트를 순회하며 상품 카드 생성 -->
-        {% for product in products %}
-
-        <!-- 상태별로 클래스 분기 -->
-        <div class="product-card
-            {% if product.listing_status == '품절' %}sold-out{% endif %}
-            {% if product.listing_status in ['경매 중', '경매 예정'] %}auction{% endif %}
-        ">
-
-            <!-- 링크와 이미지 동적 설정 -->
-            <a href="/product/{{ product.listing_id }}">
-                <div class="card-image"
-                     style="background-image: url('{{ product.image_url | default('https://placehold.co/600x400/eee/ccc?text=No+Image', true) }}');">
-
-                    <!-- 1차/2차 판매 배지 동적 설정 -->
-                    {% if product.listing_type == 'Resale' %}
-                        <span class="badge resale">Resale</span>
-                    {% else %}
-                        <span class="badge primary">Primary</span>
-                    {% endif %}
+        <div class="product-card">
+            <a href="/product/1">
+                <div class="card-image" style="background-image: url('http://fileserver.com/album_official.jpg');">
+                    <span class="badge">Primary</span>
                 </div>
             </a>
 
             <div class="card-info">
-                <!-- (★) 카테고리 -->
-                <p class="category">{{ product.category }}</p>
-
-                <!-- (★) 상품명 -->
-                <h4 class="product-name"><a href="/product/{{ product.listing_id }}">{{ product.product_name }}</a></h4>
-
-                <!-- (★) 판매자 정보 -->
-                <p class="seller-info">{{ product.seller_name }} ({{ product.seller_grade | default('N/A', true) }})</p>
-
-                <!-- (★) 가격 (경매/일반 판매 분기) -->
-                {% if product.listing_status in ['경매 중', '경매 예정'] %}
-                    <p class="product-price auction-price">현재가: {{ "{:,.0f}원".format(product.price) }}</p>
-                {% else %}
-                    <p class="product-price">{{ "{:,.0f}원".format(product.price) }}</p>
-                {% endif %}
-
-                <!-- (★) 상태 표시 (품절 > 경매 > 리셀상태 > 등급 순으로 표시) -->
-                {% if product.listing_status == '품절' %}
-                    <span class="status-tag">🚫 품절</span>
-                {% elif product.listing_status == '경매 중' %}
-                    <span class="status-tag">🔥 경매 중</span>
-                {% elif product.listing_status == '경매 예정' %}
-                    <span class="status-tag">⏳ 경매 예정</span>
-                {% elif product.listing_type == 'Resale' and product.condition %}
-                    <span class="product-condition">상태: {{ product.condition }}</span>
-                {% elif product.product_rating %}
-                    <span class="product-rating">등급: {{ product.product_rating }}</span>
-                {% endif %}
-
+                <p class="category">💿 음반</p>
+                <h4 class="product-name"><a href="/product/1">아이돌 정규 앨범 1집</a></h4>
+                <p class="seller-info">공식샵A (Gold)</p>
+                <p class="product-price">35,000원</p>
+                <span class="product-rating">등급: A</span>
             </div>
         </div>
-        {% endfor %} <!-- for 루프 끝 -->
+
+        <div class="product-card auction">
+            <a href="/auction/4">
+                <div class="card-image" style="background-image: url('');">
+                    <span class="badge resale">Resale</span>
+                </div>
+            </a>
+            <div class="card-info">
+                <p class="category">🤖 피규어</p>
+                <h4 class="product-name"><a href="/auction/4">한정판 캐릭터 피규어</a></h4>
+                <p class="seller-info">박리셀러 (Silver)</p>
+                <p class="product-price auction-price">현재가: 200,000원</p>
+                <span class="status-tag">🔥 경매 중</span>
+            </div>
+        </div>
+
+        <div class="product-card">
+            <a href="/product/3">
+                <div class="card-image" style="background-image: url('http://fileserver.com/resell/album_real_01.jpg');">
+                    <span class="badge resale">Resale</span>
+                </div>
+            </a>
+            </a>
+            <div class="card-info">
+                <p class="category">💿 음반</p>
+                <h4 class="product-name"><a href="/product/3">아이돌 정규 앨범 1집 (리셀)</a></h4>
+                <p class="seller-info">박리셀러 (Silver)</p>
+                <p class="product-price">50,000원</p>
+                <span class="product-condition">상태: 최상</span>
+            </div>
+        </div>
+
+        <div class="product-card sold-out">
+            <a href="/product/2">
+                <div class="card-image" style="background-image: url('http://fileserver.com/figure_official.jpg');">
+                    <span class="badge primary">Primary</span>
+                </div>
+            </a>
+            <div class="card-info">
+                <p class="category">🤖 피규어</p>
+                <h4 class="product-name"><a href="/product/2">한정판 캐릭터 피규어</a></h4>
+                <p class="seller-info">공식샵A (Gold)</p>
+                <p class="product-price">150,000원</p>
+                <span class="status-tag">🚫 품절</span>
+            </div>
+        </div>
 
     </div>
 {% endblock %}
