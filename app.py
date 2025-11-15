@@ -20,7 +20,8 @@ def get_db_connection():
             database="project2025",
             user="db2025",
             password="db!2025",
-            port="5432"
+            port="5432",
+            client_encoding='UTF8'
         )
         return conn
     except Exception as e:
