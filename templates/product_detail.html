@@ -140,7 +140,7 @@
 
                 <div class="action-buttons">
                     <button type="submit" class="btn primary-btn cart-btn">🛒 장바구니 담기</button>
-                    <button type="button" class="btn secondary-btn buy-btn" onclick="alert('바로 구매 기능 구현 필요')">바로 구매</button>
+                    <button type="button" class="btn secondary-btn buy-btn" id="buy-now-btn">바로 구매</button>
                 </div>
                 <!-- AJAX 응답 메시지 표시 영역 -->
                 <div id="cart-message" style="text-align: center; margin-top: 10px; font-weight: bold;"></div>
@@ -150,22 +150,51 @@
         </div>
     </div>
 
-    <script> // 경매관련
+   <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const bidForm = document.getElementById('bid-form');
-            const bidMessage = document.getElementById('bid-message');
-            const currentPriceSpan = document.querySelector('.price-value'); // 현재가 표시 요소
+            // --- 1. 공통 변수 ---
+            const basePrice = {{ listing.price | default(0) }};
+            const stock = {{ listing.stock | default(0) }};
+            const quantityInput = document.getElementById('quantity');
+            const finalPriceEl = document.getElementById('final-price');
+            const cartMessage = document.getElementById('cart-message');
 
-            // 폼이 존재할 때만 실행
+            // --- 2. 가격 계산 함수 ---
+            function updateTotalPrice() {
+                if (!quantityInput) return;
+
+                let quantity = parseInt(quantityInput.value, 10);
+
+                if (isNaN(quantity) || quantity < 1) {
+                    quantity = 1;
+                    quantityInput.value = 1;
+                }
+                if (quantity > stock) {
+                    quantity = stock;
+                    quantityInput.value = stock;
+                }
+
+                const totalPrice = basePrice * quantity;
+                finalPriceEl.textContent = totalPrice.toLocaleString('ko-KR') + '원';
+            }
+
+            // --- 3. 경매 입찰 로직 ---
+            const bidForm = document.getElementById('bid-form');
             if (bidForm) {
-                const bidPriceInput = document.getElementById('my_bid'); // 폼 안에 있어야 함!
+                const bidMessage = document.getElementById('bid-message');
+                const currentPriceSpan = document.querySelector('.current-bid-section .price-value');
+                const bidPriceInput = document.getElementById('my_bid');
 
                 bidForm.addEventListener('submit', async function(event) {
-                    event.preventDefault(); // 기본 폼 제출(새로고침) 방지
+                    event.preventDefault();
+
+                    if (!{{ session.user_id }}) {
+                        alert("입찰을 위해 로그인해주세요.");
+                        return;
+                    }
 
                     const data = {
                         auction_id: parseInt(bidForm.auction_id.value),
-                        buyer_id: {{ session.user_id }}, // Flask 세션에서 가져온 사용자 ID
                         bid_price: parseInt(bidPriceInput.value, 10)
                     };
 
@@ -185,11 +214,9 @@
                             bidMessage.textContent = result.message || "입찰 성공!";
                             bidMessage.style.color = '#ff69b4';
 
-                            // 최고 입찰가 즉시 업데이트
                             const newPrice = result.new_price;
                             currentPriceSpan.textContent = newPrice.toLocaleString('ko-KR') + '원';
 
-                            // 다음 입찰을 위해 최소 입찰가 필드 업데이트
                             bidPriceInput.min = newPrice + 1000;
                             bidPriceInput.placeholder = (newPrice + 1000).toLocaleString('ko-KR') + '원 이상';
 
@@ -204,86 +231,118 @@
                     }
                 });
             }
+
+
+            // --- 4. 일반 판매 로직 (장바구니 / 바로 구매) ---
+            const cartForm = document.getElementById('cart-form');
+
+            if (cartForm) {
+
+                // 4-1. 장바구니 담기 (Submit 이벤트)
+                cartForm.addEventListener('submit', async function(event) {
+                    event.preventDefault();
+
+                    const data = {
+                        listing_id: {{ listing.listing_id }},
+                        quantity: parseInt(quantityInput.value, 10)
+                    };
+
+                    if (!{{ session.user_id }}) {
+                        alert("장바구니에 담으려면 로그인해주세요.");
+                        return;
+                    }
+
+                    cartMessage.textContent = '장바구니 처리 중...';
+                    cartMessage.style.color = 'gray';
+
+                    try {
+                        const response = await fetch('/api/cart/add', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(data)
+                        });
+
+                        const result = await response.json();
+
+                        if (response.ok) {
+                            cartMessage.textContent = result.message;
+                            cartMessage.style.color = '#ff69b4';
+                        } else {
+                            cartMessage.textContent = `❌ 오류: ${result.error || result.message}`;
+                            cartMessage.style.color = '#dc3545';
+                        }
+
+                    } catch (error) {
+                        cartMessage.textContent = '네트워크 오류가 발생했습니다.';
+                        cartMessage.style.color = '#dc3545';
+                    }
+                });
+
+                // 4-2. 바로 구매 (Click 이벤트)
+                const buyNowBtn = document.getElementById('buy-now-btn');
+                buyNowBtn.addEventListener('click', async function() {
+
+                    const quantity = parseInt(quantityInput.value, 10);
+
+                    if (!{{ session.user_id }}) {
+                        alert("주문을 위해 로그인해주세요.");
+                        return;
+                    }
+
+                    if (!quantity || quantity <= 0) {
+                        alert("구매 수량을 1개 이상 입력해주세요.");
+                        return;
+                    }
+
+                    if (!confirm(`${quantityInput.value}개 상품을 바로 주문하시겠습니까?`)) {
+                        return;
+                    }
+
+                    const itemsToOrder = [{
+                        listing_id: {{ listing.listing_id }},
+                        quantity: quantity
+                        // cart_id는 바로 구매 시 필요 없으므로 생략
+                    }];
+
+                    cartMessage.textContent = '주문 검증 및 처리 중...';
+                    cartMessage.style.color = '#ff69b4';
+
+                    try {
+                        // 장바구니 주문 API 재사용
+                        const response = await fetch('/api/order/place', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ items: itemsToOrder })
+                        });
+
+                        const result = await response.json();
+
+                        if (response.ok) {
+                            alert(result.message);
+                            // 주문 성공 시 마이페이지 주문 내역으로 이동
+                            window.location.href = '{{ url_for("show_mypage", view="orders") }}';
+                        } else {
+                            alert(`주문 실패: ${result.error || result.message}`);
+                            cartMessage.textContent = `❌ 주문 실패: ${result.error || result.message}`;
+                            cartMessage.style.color = '#dc3545';
+                        }
+
+                    } catch (error) {
+                        cartMessage.textContent = '네트워크 오류로 주문에 실패했습니다.';
+                        cartMessage.style.color = '#dc3545';
+                    }
+                });
+            }
         });
     </script>
 
-    <script>
-        // 수량 변경 시 총 결제 금액 실시간 업데이트
-        // listing.price가 0이거나 없을 경우를 대비
-        const basePrice = {{ listing.price | default(0) }};
-        const stock = {{ listing.stock | default(0) }};
-        const quantityInput = document.getElementById('quantity');
-        const finalPriceEl = document.getElementById('final-price');
-
-        function updateTotalPrice() {
-            // quantityInput이 없을 수도 있으므로 (품절/경매 시)
-            if (!quantityInput) return;
-
-            //수량 1이상 재고 이하로 맞춰줌
-            let quantity = parseInt(quantityInput.value, 10);
-
-            if (isNaN(quantity) || quantity < 1) {
-                quantity = 1;
-                quantityInput.value = 1;
-            }
-            if (quantity > stock) {
-                quantity = stock;
-                quantityInput.value = stock;
-            }
-
-            const totalPrice = basePrice * quantity;
-            //  JS에서 쉼표 포맷팅 (toLocalString)
-            finalPriceEl.textContent = totalPrice.toLocaleString('ko-KR') + '원';
-        }
-
-        //  장바구니 담기 AJAX
-        const cartForm = document.getElementById('cart-form');
-        const cartMessage = document.getElementById('cart-message');
-
-        if (cartForm) {
-            cartForm.addEventListener('submit', async function(event) {
-                event.preventDefault(); // 기본 폼 제출(새로고침) 방지
-
-                const data = {
-                    listing_id: {{ listing.listing_id }},
-                    quantity: parseInt(quantityInput.value, 10)
-                };
-
-                cartMessage.textContent = '처리 중...';
-                cartMessage.style.color = 'gray';
-
-                try {
-                    // '/api/cart/add' API 호출
-                    const response = await fetch('/api/cart/add', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(data)
-                    });
-
-                    const result = await response.json();
-
-                    if (response.ok) {
-                        cartMessage.textContent = result.message;
-                        cartMessage.style.color = '#ff69b4'; // style.css 핑크색
-                    } else {
-                        cartMessage.textContent = `오류: ${result.error || result.message}`;
-                        cartMessage.style.color = '#dc3545'; // style.css 빨간색
-                    }
-
-                } catch (error) {
-                    cartMessage.textContent = '네트워크 오류가 발생했습니다.';
-                    cartMessage.style.color = '#dc3545';
-                }
-            });
-        }
-    </script>
 
     <style>
-        /*  썸네일 클릭 가능하도록 커서 변경 및 스타일 조정 */
+        /* 썸네일 클릭 가능하도록 커서 변경 및 스타일 조정 */
         .thumbnail-list img {
             width: 80px;
             height: 80px;
-            object-fit: cover; /*  이미지 비율 유지 */
+            object-fit: cover; /* 이미지 비율 유지 */
             cursor: pointer;
             border: 2px solid transparent;
             border-radius: 4px;
@@ -292,6 +351,70 @@
         .thumbnail-list img:hover {
             border-color: #ff69b4; /* style.css 핑크색 */
         }
+
+        .auction-box {
+            padding: 20px;
+            background-color: #fcf8e3;
+            border: 1px solid #faebcc;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        .auction-status-title {
+            text-align: center;
+            font-size: 1.3em;
+            color: #f57f17;
+            margin-bottom: 15px;
+        }
+        .auction-details-info p {
+            margin: 5px 0;
+            font-size: 0.9em;
+            color: #555;
+        }
+        .current-bid-section {
+            text-align: center;
+            margin: 20px 0;
+            padding: 15px 0;
+            border-top: 1px dashed #f0e6c3;
+            border-bottom: 1px dashed #f0e6c3;
+        }
+        .current-bid-section .label {
+            display: block;
+            font-size: 0.9em;
+            color: #777;
+        }
+        .current-bid-section .price-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #dc3545;
+        }
+        .bidder-info {
+            font-size: 0.85em;
+            color: #333;
+            margin-top: 5px;
+        }
+        .bid-input-group {
+            text-align: left;
+            margin-bottom: 15px;
+        }
+        .bid-input-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        .bid-input-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .bid-btn {
+            width: 100%;
+            padding: 12px;
+            font-size: 1.1em;
+            background-color: #ff69b4;
+            color: white;
+        }
+
     </style>
     {% endif %} <!--  if not product ... else ... end -->
 

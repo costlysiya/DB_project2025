@@ -87,6 +87,7 @@ a:hover {
     font-weight: bold;
 }
 
+/* 다은 TODO: 장바구니 아이콘 위에 장바구니에 담긴 물건 갯수 동적 변화 또는 그냥 없애기*/
 .cart-count {
     font-size: 0.8em;
     background-color: #dc3545;

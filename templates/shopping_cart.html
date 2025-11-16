@@ -65,11 +65,6 @@
                 </tbody>
             </table>
 
-<!--            <div class="cart-actions">-->
-<!--                &lt;!&ndash; 수량 변경 버튼 활성화 &ndash;&gt;-->
-<!--&lt;!&ndash;                <button type="button" id="update-cart-btn" class="btn secondary-btn">선택 상품 수량 변경</button>&ndash;&gt;-->
-<!--&lt;!&ndash;                <button type="button" id="delete-selected-btn" class="btn secondary-btn" style="background-color: #dc3545; margin-left: 10px;">선택 상품 삭제</button>&ndash;&gt;-->
-<!--            </div>-->
         </form>
     </div>
 
@@ -99,8 +94,6 @@
             const checkAll = document.getElementById('check_all');
             const itemChecks = document.querySelectorAll('input[name="selected_items"]');
             const qtyInputs = document.querySelectorAll('.qty-input');
-<!--            const deleteSelectedBtn = document.getElementById('delete-selected-btn');-->
-<!--            const updateCartBtn = document.getElementById('update-cart-btn');-->
             const rowDeleteBtns = document.querySelectorAll('.btn-delete');
             const orderBtn = document.getElementById('order-selected-btn');
             const messageArea = document.getElementById('api-message');
@@ -174,47 +167,6 @@
                     recalculateSummary();
                 });
             });
-
-<!--            //  선택 항목 삭제 기능 연결 -->
-<!--            deleteSelectedBtn.addEventListener('click', async function() {-->
-<!--                const selectedCartIds = Array.from(itemChecks)-->
-<!--                                        .filter(cb => cb.checked)-->
-<!--                                        .map(cb => parseInt(cb.value));-->
-
-<!--                if (selectedCartIds.length === 0) {-->
-<!--                    alert('삭제할 상품을 선택해주세요.');-->
-<!--                    return;-->
-<!--                }-->
-<!--                if (!confirm(`선택한 상품 ${selectedCartIds.length}개를 장바구니에서 삭제하시겠습니까?`)) {-->
-<!--                    return;-->
-<!--                }-->
-
-<!--                messageArea.textContent = '선택 항목 삭제 요청 중...';-->
-<!--                messageArea.style.color = 'gray';-->
-
-<!--                try {-->
-<!--                    const response = await fetch('/api/cart/remove', {-->
-<!--                        method: 'POST',-->
-<!--                        headers: { 'Content-Type': 'application/json' },-->
-<!--                        body: JSON.stringify({ cart_ids: selectedCartIds })-->
-<!--                    });-->
-
-<!--                    const result = await response.json();-->
-
-<!--                    if (response.ok) {-->
-<!--                        alert(result.message);-->
-<!--                        window.location.reload(); // 페이지 새로고침으로 UI 완벽 반영-->
-<!--                    } else {-->
-<!--                        alert(`삭제 실패: ${result.error || result.message}`);-->
-<!--                        messageArea.textContent = `삭제 실패: ${result.error || result.message}`;-->
-<!--                        messageArea.style.color = '#dc3545';-->
-<!--                    }-->
-
-<!--                } catch (error) {-->
-<!--                    messageArea.textContent = '네트워크 오류로 삭제에 실패했습니다.';-->
-<!--                    messageArea.style.color = '#dc3545';-->
-<!--                }-->
-<!--            });-->
 
             // (개별 삭제 버튼 연결)
             rowDeleteBtns.forEach(btn => {

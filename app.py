@@ -3,7 +3,7 @@ import psycopg2
 from psycopg2 import extras
 import os
 import datetime
-
+from decimal import Decimal
 app = Flask(__name__)
 
 # --- 세션 사용을 위한 secret_key 설정 ---
@@ -70,7 +70,6 @@ def format_number(value):
 # Flask 앱에 필터 등록
 app.jinja_env.filters['number_format'] = format_number
 
-#페이지 렌더링 라우터 (HTML)
 
 #DB에서 상품을 조회하는 공통 함수
 def get_products_from_db(category=None, search_term=None, auction_only=False):
@@ -114,6 +113,156 @@ def get_products_from_db(category=None, search_term=None, auction_only=False):
 
     return products, len(products)
 
+#사용자 정보 가져오는 함수
+def get_user_profile_data(user_id, role):
+    conn = get_db_connection()
+    if conn is None:
+        return None
+
+    user_profile = {'user': {'id': user_id, 'role': role}}
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    try:
+        # 1. Users 테이블에서 이름 조회 (세션에 이름이 없는 경우 대비)
+        cur.execute("SELECT name, role FROM Users WHERE user_id = %s", (user_id,))
+        user_data = cur.fetchone()
+        if user_data:
+            user_profile['user']['name'] = user_data['name']
+            user_profile['user']['role'] = user_data['role'] # 혹시 세션과 다를 경우 갱신
+
+        # 2. 역할별 상세 프로필 조회
+        if role == 'Buyer':
+            cur.execute("SELECT address FROM BuyerProfile WHERE user_id = %s", (user_id,))
+            user_profile['buyer_profile'] = dict(cur.fetchone()) if cur.rowcount > 0 else {}
+        elif role in ['PrimarySeller', 'Reseller']:
+            cur.execute("SELECT store_name, grade FROM SellerProfile WHERE user_id = %s", (user_id,))
+            user_profile['seller_profile'] = dict(cur.fetchone()) if cur.rowcount > 0 else {}
+        else: # Administrator
+            user_profile['admin_profile'] = {} # 관리자는 특별 프로필 정보 없음
+
+        cur.close()
+        conn.close()
+        return user_profile
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        print(f"마이페이지 프로필 조회 중 오류 발생: {str(e)}")
+        return None
+
+#주문 목록 조회 함수 (구매자 전용)
+def get_orders_for_buyer(user_id):
+    conn = get_db_connection()
+    if conn is None:
+        return [], 0
+    orders = []
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("""
+            SELECT 
+                O.order_id,
+                O.quantity, 
+                O.total_price, 
+                O.order_date, 
+                O.status,
+                V.product_name, 
+                V.seller_name,
+                V.image_url,
+                V.listing_id
+            FROM orderb O, v_all_products V
+            WHERE O.buyer_id = %s and O.listing_id = V.listing_id
+            ORDER BY O.order_date DESC;
+            """, (user_id,))
+        orders = [dict(row) for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return orders
+    except Exception as e:
+        if conn:
+            conn.close()
+        print(f"주문/배송 내역 조회 중 오류 발생: {str(e)}")
+        return []  # 오류 시 빈 리스트 반환
+
+
+# ---  판매자 주문/판매 내역 조회 함수 (Seller 전용) ---
+def get_sales_for_seller(user_id):
+    conn = get_db_connection()
+    if conn is None:
+        return []
+
+    sales_orders = []
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        # 해당 판매자(user_id)가 등록한 listing_id를 통해 들어온 주문을 조회
+        cur.execute("""
+            SELECT 
+                O.order_id,
+                O.quantity, 
+                O.total_price, 
+                O.order_date, 
+                O.status,
+                V.product_name, 
+                V.seller_name,
+                V.image_url,
+                V.listing_id,
+                U.name AS buyer_name,
+                U.user_uid AS buyer_uid,
+                B.address as address
+            FROM orderb O
+            JOIN v_all_products V ON O.listing_id = V.listing_id
+            JOIN Listing L ON O.listing_id = L.listing_id
+            JOIN Users U ON O.buyer_id = U.user_id -- 구매자 정보 조회용
+            Join buyerprofile B on O.buyer_id = B.user_id
+            WHERE L.seller_id = %s
+            ORDER BY O.order_date DESC;
+            """, (user_id,))
+
+        sales_orders = [dict(row) for row in cur.fetchall()]
+
+        cur.close()
+        conn.close()
+        return sales_orders
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        print(f"판매자 주문 내역 조회 중 오류 발생: {str(e)}")
+        return []
+
+def get_my_products_list(user_id):
+    conn = get_db_connection()
+    if conn is None:
+        return []
+
+    my_products = []
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("""
+            SELECT 
+                V.listing_id,
+                V.product_name, 
+                V.category,
+                V.image_url,
+                V.price,
+                V.stock,
+                V.listing_status,
+                V.condition
+            FROM listing L, v_all_products V  
+            WHERE L.listing_id = V.listing_id and L.seller_id = %s
+            """, (user_id,))
+
+        my_products = [dict(row) for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return my_products
+    except Exception as e:
+        if conn:
+            conn.close()
+        print(f"판매자 판매 상품 조회 중 오류 발생: {str(e)}")
+        return []
+
+
+#페이지 렌더링 라우터 (HTML)
 
 # --- 메인 페이지 (전체 상품) ---
 @app.route('/')
@@ -409,6 +558,43 @@ def logout_user():
     session.pop('user_role', None)
     # 로그아웃 후 로그인 페이지로 이동
     return redirect(url_for('show_login_page'))
+
+# 마이 페이지
+@app.route('/mypage', methods=['GET'])
+def show_mypage():
+    # 로그인 여부 확인
+    if 'user_id' not in session:
+        return redirect(url_for('show_login_page'))
+
+    user_id = session.get('user_id')
+    user_role = session.get('user_role')
+
+    # 쿼리 파라미터에서 현재 보여줄 뷰(view)를 가져옴 (기본값: summary)
+    current_view = request.args.get('view', 'summary')
+
+    # DB에서 사용자 역할에 따른 프로필 데이터 조회
+    user_profile = get_user_profile_data(user_id, user_role)
+
+    if user_profile is None:
+        # DB 연결 실패 또는 데이터 조회 실패 시 임시 오류 처리
+        return "마이페이지 데이터 로드에 실패했습니다. DB 연결을 확인해주세요.", 500
+
+    # 뷰(view)에 따라 필요한 추가 데이터 조회
+    template_data = {
+        "user_profile": user_profile,
+        "view": current_view,
+        "orders": [], # 기본값
+        "sales_orders": [], # 기본값
+        "my_products": [] #기본값
+    }
+    if current_view == 'orders' and user_role == 'Buyer':
+        template_data["orders"] = get_orders_for_buyer(user_id)
+    elif current_view == 'sales' and user_role in ['PrimarySeller','Reseller']:
+        template_data["sales_orders"] = get_sales_for_seller(user_id)
+    elif current_view == 'my_products' and user_role in ['PrimarySeller','Reseller']:
+        template_data["my_products"] = get_my_products_list(user_id)
+        # 5. 템플릿 렌더링
+    return render_template('mypage.html', **template_data)
 
 
 # ===============================================
@@ -1210,6 +1396,145 @@ def place_order():
     except Exception as e:
         conn.rollback()
         return jsonify({"error": f"주문 처리 트랜잭션 실패: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+# --- 주문 상태 변경 API (판매자 전용) ---
+@app.route('/api/order/update_status', methods=['POST'])
+def update_order_status():
+    # 1. 권한 확인
+    if 'user_id' not in session or session.get('user_role') not in ['PrimarySeller', 'Reseller']:
+        return jsonify({"error": "판매자만 주문 상태를 변경할 수 있습니다."}), 403
+
+    data = request.json
+    order_id = data.get('order_id')
+
+    if not order_id:
+        return jsonify({"error": "주문 ID가 필요합니다."}), 400
+
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({"error": "데이터베이스 연결 실패"}), 500
+
+    conn.autocommit = False
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    seller_id = session.get('user_id')
+
+    try:
+        # 1. 주문 정보 및 소유권 확인 (Orderb와 Listing 조인하여 판매자 ID 확인)
+        cur.execute(
+            """
+            SELECT O.status, O.order_id
+            FROM Orderb O
+            JOIN Listing L ON O.listing_id = L.listing_id
+            WHERE O.order_id = %s AND L.seller_id = %s
+            FOR UPDATE
+            """,
+            (order_id, seller_id)
+        )
+        order_info = cur.fetchone()
+
+        if not order_info:
+            conn.rollback()
+            return jsonify({"error": "주문 ID를 찾을 수 없거나 해당 주문의 판매자가 아닙니다."}), 404
+
+        current_status = order_info['status']
+        next_status = None
+
+        # 2. 다음 상태 결정
+        if current_status == '상품 준비중':
+            next_status = '배송 중'
+        elif current_status == '배송 중':
+            next_status = '배송 완료'
+        elif current_status in ['배송 완료', '환불', '교환']:
+            conn.rollback()
+            return jsonify({"message": f"주문 상태 '{current_status}'는 더 이상 변경할 수 없습니다."}), 400
+        else:
+            conn.rollback()
+            return jsonify({"error": "알 수 없는 주문 상태입니다."}), 500
+
+        # 3. DB 업데이트
+        cur.execute(
+            "UPDATE Orderb SET status = %s WHERE order_id = %s",
+            (next_status, order_id)
+        )
+
+        conn.commit()
+        return jsonify({
+            "message": f"주문 #{order_id}의 상태가 '{next_status}'로 변경되었습니다.",
+            "new_status": next_status
+        }), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"주문 상태 업데이트 실패: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+# --- 회원 정보 수정 API ---
+@app.route('/api/mypage/update', methods=['POST'])
+def api_update_profile():
+    if 'user_id' not in session:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+
+    data = request.json
+    user_id = session.get('user_id')
+    role = session.get('user_role')
+
+    # 공통 정보
+    new_name = data.get('name')
+    new_password = data.get('password')  # 실제 환경에서는 해싱 필수!
+
+    # 역할별 정보
+    new_address = data.get('address')
+    new_store_name = data.get('store_name')
+
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({"error": "데이터베이스 연결 실패"}), 500
+
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        # 1. Users 테이블 업데이트 (이름, 비밀번호)
+        update_user_sql = []
+        update_user_params = []
+
+        if new_name:
+            update_user_sql.append("name = %s")
+            update_user_params.append(new_name)
+        if new_password:
+            update_user_sql.append("password = %s")  # 실제로는 해싱해야 함
+            update_user_params.append(new_password)
+
+        if update_user_sql:
+            sql = "UPDATE Users SET " + ", ".join(update_user_sql) + " WHERE user_id = %s"
+            cur.execute(sql, update_user_params + [user_id])
+
+            # 세션 이름 업데이트
+            if new_name:
+                session['user_name'] = new_name
+
+        # 2. 역할별 프로필 테이블 업데이트
+        if role == 'Buyer' and new_address:
+            # BuyerProfile에 주소 업데이트 (INSERT ON CONFLICT UPDATE 로직이 더 안전하지만, 여기서는 UPDATE로 단순화)
+            cur.execute("UPDATE BuyerProfile SET address = %s WHERE user_id = %s", (new_address, user_id))
+
+        elif role in ['PrimarySeller', 'Reseller'] and new_store_name:
+            # SellerProfile에 상점명 업데이트
+            cur.execute("UPDATE SellerProfile SET store_name = %s WHERE user_id = %s", (new_store_name, user_id))
+
+        conn.commit()
+        return jsonify({"message": "회원 정보가 성공적으로 업데이트되었습니다."}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"정보 수정 트랜잭션 실패: {str(e)}"}), 500
     finally:
         cur.close()
         conn.close()

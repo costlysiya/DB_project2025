@@ -25,12 +25,11 @@
             </form>
             <div class="action-icon-group">
                 {% if session.user_role in ['PrimarySeller', 'Reseller'] %}
-                    <!-- (★수정) app.py에 정의된 라우터로 변경 -->
                     <a href="{{ url_for('show_product_register_page') }}" class="seller-icon">🛍️ 상품 등록</a>
                 {% elif session.user_role == 'Buyer' or not session.user_id %}
                     <a href="/cart" class="cart-icon">🛒 <span class="cart-count">{{ session.cart_count | default(0) }}</span></a>
                 {% elif session.user_role == 'Administrator' %}
-                     <a href="/admin/dashboard">관리자모드</a>
+                     <a href="/mypage">관리자모드</a>
                 {% endif %}
             </div>
         </div>

@@ -6,50 +6,442 @@
     
     <h2>마이페이지</h2>
     
+    <!-- 사용자 프로필 섹션 -->
     <div class="user-welcome-section">
-        <p><strong>{{ user.name }}</strong>님, 환영합니다! (역할: <span class="user-role">{{ user.role }}</span>)</p>
+        <p><strong>{{ user_profile.user.name }}</strong>님, 환영합니다! (역할: <span class="user-role">{{ user_profile.user.role }}</span>)</p>
         <p>
-            {% if user.role == 'Buyer' %}
-                현재 배송 주소: {{ buyer_profile.address }}
-            {% elif user.role == 'PrimarySeller' or user.role == 'Reseller' %}
-                판매자 등급: <span class="seller-grade-badge">{{ seller_profile.grade }}</span>
+            {% if user_profile.user.role == 'Buyer' %}
+                현재 배송 주소: {{ user_profile.buyer_profile.address | default('주소 미등록') }}
+            {% elif user_profile.user.role in ['PrimarySeller', 'Reseller'] %}
+                판매자 상점: {{ user_profile.seller_profile.store_name | default('미지정') }} |
+                판매자 등급: <span class="seller-grade-badge">{{ user_profile.seller_profile.grade | default('Bronze', true) }}</span>
             {% endif %}
         </p>
     </div>
 
     <div class="mypage-dashboard">
-        
+
         <nav class="mypage-sidebar">
             <ul>
-                <li class="menu-title">계정 및 쇼핑</li>
-                <li><a href="/mypage/profile">정보 수정</a></li>
-                {% if user.role == 'Buyer' %}
-                <li><a href="/mypage/orders">📦 주문/배송 내역 조회</a></li>
-                <li><a href="/mypage/disputes">📞 분쟁 처리 현황</a></li> <li><a href="/mypage/feedback/write">⭐ 판매자 평가 남기기</a></li>
-                {% endif %}
-                
-                {% if user.role == 'PrimarySeller' or user.role == 'Reseller' %}
-                <li class="menu-title">판매 관리 기능</li>
-                <li><a href="/seller/listing">📈 상품/재고 관리</a></li> <li><a href="/seller/sales">💰 매출 통계 확인</a></li>
-                <li><a href="/seller/evaluation">⭐ 받은 평가 보기</a></li> {% endif %}
+                <!-- 기본 대시보드 페이지 -->
+                <li><a href="{{ url_for('show_mypage', view='profile') }}" class="{% if view == 'profile' %}active{% endif %}">👤 개인 정보 수정</a></li>
 
-                {% if user.role == 'Administrator' %}
-                <li class="menu-title">관리자 기능</li>
-                <li><a href="/admin/rating">💎 굿즈 등급 부여</a></li> <li><a href="/admin/disputes">📝 분쟁 조정 (환불/교환)</a></li> <li><a href="/admin/seller_eval">🏆 판매자 평가 관리</a></li> {% endif %}
-                
+                {% if user_profile.user.role == 'Buyer' %}
+                <li><a href="{{ url_for('show_mypage', view='orders') }}" class="{% if view == 'orders' %}active{% endif %}">📦 주문/배송 내역 조회</a></li>
+                <li><a href="{{ url_for('show_mypage', view='disputes') }}" class="{% if view == 'disputes' %}active{% endif %}">📞 분쟁 처리 현황</a></li>
+                <li><a href="{{ url_for('show_mypage', view='feedback') }}" class="{% if view == 'feedback' %}active{% endif %}">⭐ 판매자 평가 남기기</a></li>
+                {% endif %}
+
+                {% if user_profile.user.role in ['PrimarySeller', 'Reseller'] %}
+                <li><a href="{{ url_for('show_mypage', view='my_products') }}" class="{% if view == 'my_products' %}active{% endif %}">📈 상품 등록 내역</a></li>
+                <li><a href="{{ url_for('show_mypage', view='sales') }}" class="{% if view == 'sales' %}active{% endif %}">💰 판매 내역 확인</a></li>
+                <li><a href="{{ url_for('show_mypage', view='evaluation') }}" class="{% if view == 'evaluation' %}active{% endif %}">⭐ 받은 평가 보기</a></li>
+                {% endif %}
+
+                {% if user_profile.user.role == 'Administrator' %}
+                <li><a href="{{ url_for('show_mypage', view='admin_rating') }}" class="{% if view == 'admin_rating' %}active{% endif %}">💎 굿즈 등급 부여</a></li>
+                <li><a href="{{ url_for('show_mypage', view='admin_disputes') }}" class="{% if view == 'admin_disputes' %}active{% endif %}">📝 분쟁 조정</a></li>
+                <li><a href="{{ url_for('show_mypage', view='admin_seller_eval') }}" class="{% if view == 'admin_seller_eval' %}active{% endif %}">🏆 판매자 평가 관리</a></li>
+                {% endif %}
+
             </ul>
         </nav>
-        
+
         <div class="mypage-content">
-            <h3>최근 활동 요약</h3>
-            {% if user.role == 'Buyer' %}
-            <p>최근 주문: 아이돌 정규 앨범 1집 (상태: 배송 완료)</p>
-            <a href="/mypage/orders" class="btn primary-btn">전체 주문 내역 보기</a>
-            {% else %}
-            <p>총 판매 건수: 12건</p>
-            <p>평균 평가 점수: 4.9점</p>
-            <a href="/seller/sales" class="btn primary-btn">판매 대시보드 바로가기</a>
-            {% endif %}
+<!--다은 TODO: 동적으로 보이는 부분에서 표 style 수정 필요 (너무 붙어잇음)-->
+            {% if not view %}
+            <h3>매뉴를 선택해 주세요</h3>
+            {% elif view == 'orders' %}
+                <!-- 주문/배송 내역 조회 (Buyer) -->
+                <h3>📦 주문/배송 내역 조회</h3>
+                {% if orders %}
+                    <p>총 {{ orders | length }}건의 주문 내역이 있습니다.</p>
+                    <!-- 주문 목록 테이블 렌더링 -->
+                    <table class="order-history-table">
+                        <thead>
+                            <tr>
+                                <th>주문 상품</th>
+                                <th>판매자</th>
+                                <th>수량</th>
+                                <th>결제 금액</th>
+                                <th>주문 일시</th>
+                                <th>배송 상태</th>
+                                <th>환불/교환</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for order in orders %}
+                            <tr>
+                                <td>
+                                    <a href="{{ url_for('show_product_detail', listing_id=order.listing_id) }}">
+                                        <img src="{{ order.image_url | default('https://placehold.co/60x60/eee/ccc?text=Goods', true) }}" alt="{{ order.product_name }}" width="40" height="40" style="margin-right: 10px; border-radius: 4px; vertical-align: middle;">
+                                        {{ order.product_name }}
+                                    </a>
+                                </td>
+                                <td>{{ order.seller_name }}</td>
+                                <td>{{ order.quantity }}</td>
+                                <td>{{ "{:,.0f}원".format(order.total_price) }}</td>
+                                <td>{{ order.order_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>{{ order.status }}</td>
+                                <td>
+                                    {% if order.status == '배송 완료' %}
+                                        <button class="btn dispute-btn btn-refund" onclick="showDisputeModal({{ order.order_id }}, '환불')">
+                                            환불 요청
+                                        </button>
+                                        <button class="btn dispute-btn btn-exchange" onclick="showDisputeModal({{ order.order_id }}, '교환')">
+                                            교환 요청
+                                        </button>
+                                    {% elif order.status in ['환불', '교환'] %}
+                                        <span class="status-dispute">{{ order.status }} 처리 중</span>
+                                    {% else %}
+                                         -
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p>주문 내역이 없습니다.</p>
+                {% endif %}
+
+            {% elif view == 'my_products' %}
+                <h3>📈 내 상품 목록 (재고 관리)</h3>
+                {% if my_products %}
+                    <p>총 {{ my_products | length }}건의 상품이 있습니다.</p>
+                    <table class="order-history-table">
+                        <thead>
+                            <tr>
+                                <th>상품 정보</th>
+                                <th>카테고리</th>
+                                <th>가격</th>
+                                <th>재고</th>
+                                <th>판매 상태</th>
+                                <th>상태</th>
+                                <th>관리</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for product in my_products %}
+                            <tr data-listing-id="{{ product.listing_id }}">
+                                <td>
+                                    <a href="{{ url_for('show_product_detail', listing_id=product.listing_id) }}" style="display: flex; align-items: center;">
+                                        <img src="{{ product.image_url | default('https://placehold.co/60x60/eee/ccc?text=Goods', true) }}" alt="{{ product.product_name }}" width="40" height="40" style="margin-right: 10px; border-radius: 4px;">
+                                        {{ product.product_name }}
+                                    </a>
+                                </td>
+                                <td>{{ product.category }}</td>
+                                <td>{{ "{:,.0f}원".format(product.price) }}</td>
+                                <td>{{ product.stock }}개</td>
+                                <td>{{ product.listing_status }}</td>
+                                <td>{{ product.condition | default('-') }}</td>
+                                <td>
+                                    <!-- TODO: 상품 수정 페이지 링크 -->
+                                    <button class="btn secondary-btn" onclick="alert('상품 수정 페이지로 이동')">수정</button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p>등록한 상품이 없습니다. <a href="{{ url_for('show_product_register_page') }}">상품을 등록</a>해보세요.</p>
+                {% endif %}
+
+            {% elif view == 'sales' %}
+            <h3>💰 판매 내역(주문 내역)</h3>
+                {% if sales_orders %}
+                    <p>총 {{ sales_orders | length }}건의 판매 내역이 있습니다.</p>
+                    <table class="order-history-table">
+                        <thead>
+                            <tr>
+                                <th>상품 정보</th>
+                                <th>구매자</th>
+                                <th>주소</th>
+                                <th>수량</th>
+                                <th>총 금액</th>
+                                <th>주문 일시</th>
+                                <th>처리 상태</th>
+                                <th>액션</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for order in sales_orders %}
+                            <tr data-order-id="{{ order.order_id }}">
+                                <td>
+                                    <a href="{{ url_for('show_product_detail', listing_id=order.listing_id) }}">
+                                        <img src="{{ order.image_url | default('https://placehold.co/60x60/eee/ccc?text=Goods', true) }}" alt="{{ order.product_name }}" width="40" height="40" style="margin-right: 10px; border-radius: 4px; vertical-align: middle;">
+                                        {{ order.product_name }}
+                                    </a>
+                                </td>
+                                <td>{{ order.buyer_name }} ({{ order.buyer_uid }})</td>
+                                <td>{{ order.buyer_address }}</td>
+                                <td>{{ order.quantity }}</td>
+                                <td>{{ "{:,.0f}원".format(order.total_price) }}</td>
+                                <td>{{ order.order_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td class="order-status-{{ order.order_id }}">{{ order.status }}</td>
+                                <td>
+                                    <!--  주문 상태 변경 버튼 (클릭 이벤트 연결) -->
+                                    <button class="btn update-status-btn"
+                                            data-order-id="{{ order.order_id }}"
+                                            data-current-status="{{ order.status }}"
+                                            {% if order.status in ['배송 완료', '환불', '교환'] %} disabled {% endif %}
+                                            style="{% if order.status == '배송 중' %} background-color: orange; {% elif order.status == '상품 준비중' %} background-color: #007bff; {% else %} background-color: #6c757d; {% endif %} color: white; border: none; padding: 5px 10px; border-radius: 4px;">
+                                        {{ '배송 처리' if order.status == '상품 준비중' else '출고 완료' if order.status == '배송 중' else '상태 변경 불가' }}
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p>최근 판매 내역이 없습니다.</p>
+                {% endif %}
+
+            {% elif view == 'evaluation' %}
+            <!-- TODO: 받은 평가 보기 (Seller) -->
+            <h3>⭐ 받은 평가 보기</h3>
+            <p>구매자들이 남긴 판매자 평가 목록이 여기에 표시됩니다.</p>
+
+            {% elif view == 'disputes' %}
+            <!-- TODO: 분쟁 처리 현황 (Buyer) -->
+            <h3>📞 분쟁 처리 현황</h3>
+            <p>환불/교환 요청 목록과 처리 상태가 여기에 표시됩니다.</p>
+
+            {% elif view == 'profile' %}
+            <!--TODO: 정보 수정 -->
+            <h3>👤 회원 정보 수정</h3>
+            <p class="subtitle">필요한 항목만 입력하고 수정 버튼을 눌러주세요.</p>
+
+            <div class="form-container wide" style="margin: 0 auto; box-shadow: none; border: none;">
+                <form id="profile-update-form">
+                    <!-- 공통 정보 -->
+                    <div class="form-group-section">
+                        <h3>기본 계정 정보</h3>
+                        <div class="form-group">
+                            <label for="uid">아이디 (로그인 ID)</label>
+                            <!-- user_uid는 수정 불가 -->
+                            <input type="text" id="uid" value="{{ user_profile.user.user_uid }}" disabled style="background-color: #f5f5f5;">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="name">이름/활동명</label>
+                            <input type="text" id="name" name="name" value="{{ user_profile.user.name }}" required>
+                            <p class="note">현재 이름: <strong>{{ user_profile.user.name }}</strong></p>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="password">비밀번호 변경</label>
+                            <input type="password" id="password" name="password" placeholder="새 비밀번호를 입력하세요 (미입력 시 변경 안 함)">
+                        </div>
+                    </div>
+                    <hr>
+                    <!-- 역할별 정보 -->
+                    {% if user_profile.user.role == 'Buyer' %}
+                    <div class="form-group-section">
+                        <h3>배송 정보 (구매자 전용)</h3>
+                        <div class="form-group">
+                            <label for="address">기본 배송 주소</label>
+                            <input type="text" id="address" name="address"
+                                   value="{{ user_profile.buyer_profile.address | default('') }}"
+                                   placeholder="주소를 입력해주세요">
+                        </div>
+                    </div>
+
+                    {% elif user_profile.user.role in ['PrimarySeller', 'Reseller'] %}
+                    <div class="form-group-section">
+                        <h3>판매자 정보</h3>
+                        <div class="form-group">
+                            <label for="store_name">상점명 (Seller 전용)</label>
+                            <input type="text" id="store_name" name="store_name"
+                                   value="{{ user_profile.seller_profile.store_name | default('') }}"
+                                   placeholder="상점명을 입력하세요">
+                        </div>
+                    </div>
+
+                    {% elif user_profile.user.role == 'Administrator' %}
+                    <div class="form-group-section">
+                        <h3>관리자 계정</h3>
+                        <p class="note" style="color: green;">관리자 계정은 이름/비밀번호만 수정할 수 있습니다.</p>
+                    </div>
+                    {% endif %}
+
+                    <button type="submit" class="btn full-width submit-btn" style="margin-top: 30px;">정보 수정 완료</button>
+                    <div id="api-message" class="message-box" style="margin-top: 15px;"></div>
+                </form>
+            </div>
+                {% endif %}
+
+
+            <script>
+                // 다은 TODO: 여기서 style부분 따로 style.css파일로 옮기기
+                document.addEventListener('DOMContentLoaded', function() {
+                    // 마이페이지 판매자 주문 내역에서만 실행
+                    const updateStatusBtns = document.querySelectorAll('.update-status-btn');
+
+                    const getNextStatusInfo = (currentStatus) => {
+                        if (currentStatus === '상품 준비중') {
+                            return { next: '배송 중', confirmMsg: '주문 상태를 [배송 중]으로 변경하시겠습니까?' };
+                        } else if (currentStatus === '배송 중') {
+                            return { next: '배송 완료', confirmMsg: '주문 상태를 [배송 완료]로 변경하시겠습니까?' };
+                        }
+                        return null; // 변경 불가능 상태
+                    };
+
+                    updateStatusBtns.forEach(button => {
+                        button.addEventListener('click', async function() {
+                            const orderId = this.getAttribute('data-order-id');
+                            const currentStatus = this.getAttribute('data-current-status');
+                            const statusInfo = getNextStatusInfo(currentStatus);
+
+                            if (!statusInfo) {
+                                alert(`주문 상태 '${currentStatus}'는 변경할 수 없습니다.`);
+                                return;
+                            }
+
+                            if (!confirm(statusInfo.confirmMsg)) {
+                                return;
+                            }
+
+                            // 버튼 비활성화 (중복 클릭 방지)
+                            this.disabled = true;
+                            this.textContent = '처리 중...';
+
+                            try {
+                                const response = await fetch('/api/order/update_status', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ order_id: orderId })
+                                });
+
+                                const result = await response.json();
+                                const statusCell = document.querySelector(`.order-status-${orderId}`);
+
+                                if (response.ok) {
+                                    const newStatus = result.new_status;
+                                    alert(`상태 변경 성공: ${newStatus}`);
+
+                                    // UI 업데이트
+                                    statusCell.textContent = newStatus;
+                                    this.setAttribute('data-current-status', newStatus);
+
+                                    // 버튼 텍스트 및 스타일 업데이트 (다음 상태를 위한 준비)
+                                    if (newStatus === '배송 중') {
+                                        this.textContent = '출고 완료';
+                                        this.style.backgroundColor = 'orange';
+                                        this.disabled = false; // 다음 상태로의 변경 허용
+                                    } else if (newStatus === '배송 완료') {
+                                        this.textContent = '상태 변경 불가';
+                                        this.style.backgroundColor = '#6c757d';
+                                        this.disabled = true; // 최종 상태이므로 비활성화
+                                    }
+                                } else {
+                                    alert(`상태 변경 실패: ${result.error || result.message}`);
+                                    // 실패 시 버튼 롤백
+                                    this.textContent = currentStatus === '상품 준비중' ? '배송 처리' : '출고 완료';
+                                    this.disabled = false;
+                                }
+
+                            } catch (error) {
+                                alert('네트워크 오류로 상태 변경에 실패했습니다.');
+                                // 실패 시 버튼 롤백
+                                this.textContent = currentStatus === '상품 준비중' ? '배송 처리' : '출고 완료';
+                                this.disabled = false;
+                            }
+                        });
+                    });
+                });
+                //분쟁 처리 관련 JS로직
+                function showDisputeModal(orderId, issueType) {
+                    const reason = prompt(`주문 #${orderId}에 대한 ${issueType} 요청 사유를 간단히 입력해주세요:`);
+
+                    if (reason) {
+                    //TODO:
+                        // 실제 API 호출 로직 (Dispute 테이블에 INSERT)
+                        // 현재는 구현되지 않았으므로 alert로 대체
+                        alert(`[${issueType} 요청 접수]\n주문 ID: ${orderId}\n사유: "${reason}"\n\n⚠️ 실제 분쟁 처리 API('/api/dispute/create') 구현 필요.`);
+                        // TODO: 성공 가정 시 '/api/dispute/create'를 호출하고, 성공하면 페이지를 새로고침하여 상태를 '환불 처리 중' 등으로 변경해야 함.
+                    }
+                }
+                //개인 정보 수정 관련 로직
+                                document.addEventListener('DOMContentLoaded', function() {
+                    const form = document.getElementById('profile-update-form');
+                    const messageArea = document.getElementById('api-message');
+
+                    form.addEventListener('submit', async function(event) {
+                        event.preventDefault();
+
+                        messageArea.textContent = '정보 수정 요청 중...';
+                        messageArea.style.color = 'gray';
+
+                        const formData = new FormData(form);
+                        const data = {
+                            password: formData.get('password'),
+                            name: formData.get('name'),
+                        };
+
+                        // 역할별 필드 추가
+                        if (formData.has('address')) {
+                            data.address = formData.get('address');
+                        }
+                        if (formData.has('store_name')) {
+                            data.store_name = formData.get('store_name');
+                        }
+
+                        try {
+                            const response = await fetch('/api/mypage/update', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(data)
+                            });
+
+                            const result = await response.json();
+
+                            if (response.ok) {
+                                messageArea.textContent = result.message;
+                                messageArea.style.color = '#2ecc71'; // 성공 색상
+                                // 수정 성공 후 세션 정보 갱신을 위해 마이페이지 새로고침 (뷰는 profile 유지)
+                                setTimeout(() => {
+                                    window.location.href = '{{ url_for("show_mypage", view="profile") }}';
+                                }, 1500);
+                            } else {
+                                messageArea.textContent = `수정 실패: ${result.error || result.message}`;
+                                messageArea.style.color = '#dc3545'; // 실패 색상
+                            }
+
+                        } catch (error) {
+                            messageArea.textContent = '네트워크 오류가 발생했습니다.';
+                            messageArea.style.color = '#dc3545';
+                        }
+                    });
+                });
+
+                // CSS 스타일 추가 (Dispute 버튼)
+                const style = document.createElement('style');
+                style.innerHTML = `
+                    .dispute-btn {
+                        padding: 5px 8px;
+                        font-size: 0.85em;
+                        margin-left: 5px;
+                        border-radius: 4px;
+                        border: 1px solid;
+                    }
+                    .btn-refund {
+                        background-color: #f4d03f; /* 노란색 */
+                        border-color: #f1c40f;
+                        color: #333;
+                    }
+                    .btn-exchange {
+                        background-color: #5d9cec; /* 파란색 */
+                        border-color: #3498db;
+                        color: white;
+                    }
+                    .status-dispute {
+                        font-weight: bold;
+                        color: #e74c3c; /* 빨간색 */
+                    }
+                `;
+                document.head.appendChild(style);
+            </script>
         </div>
     </div>
 {% endblock %}
