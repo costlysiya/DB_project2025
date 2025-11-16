@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request, render_template, session, redirect, u
 import psycopg2
 from psycopg2 import extras
 import os
+import datetime
 
 app = Flask(__name__)
 
@@ -20,7 +21,9 @@ def get_db_connection():
             database="project2025",
             user="db2025",
             password="db!2025",
-            port="5432"
+            port="5432",
+            client_encoding='UTF8'
+
         )
         return conn
     except Exception as e:
@@ -39,6 +42,33 @@ def check_db_connection():
             print(f"DB 연결 테스트 중 오류 발생: {e}")
             return False
     return False
+
+def format_datetime(value, format='%Y-%m-%d %H:%M:%S'):
+    """ datetime 객체를 지정된 포맷의 문자열로 변환하는 필터 """
+    if value is None:
+        return ""
+    if isinstance(value, datetime.datetime):
+        # 파이썬 datetime 객체일 경우 포맷팅
+        return value.strftime(format)
+    # 문자열 등 다른 타입일 경우 그대로 반환
+    return str(value)
+
+# Flask 앱에 필터 등록
+app.jinja_env.filters['datetime_format'] = format_datetime
+
+def format_number(value):
+    """ 숫자를 천 단위 쉼표로 포맷팅하는 필터 """
+    if value is None:
+        return "0"
+    try:
+        # Python의 내장 format 함수를 사용하여 쉼표 포맷팅을 적용
+        return "{:,.0f}".format(float(value))
+    except (ValueError, TypeError):
+        # 숫자가 아닌 경우 그대로 반환
+        return str(value)
+
+# Flask 앱에 필터 등록
+app.jinja_env.filters['number_format'] = format_number
 
 #페이지 렌더링 라우터 (HTML)
 
@@ -122,21 +152,34 @@ def show_product_detail(listing_id):
     listing = None
     seller = None
     resale_images = []
+    auction = None  # ✨ 경매 변수 초기화 ✨
 
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        # 1. Listing 및 Product 정보 조회 (V_All_Products 뷰 대신 상세 쿼리 사용)
+        # 1. Listing 및 Product 정보 조회 (기존 쿼리 유지)
         cur.execute(
             """
-            SELECT 
-                L.listing_id, L.product_id, L.seller_id, L.listing_type, L.price, L.stock, L.status, L.condition,
-                P.name AS product_name, P.category, P.description, P.rating, P.image_url,
-                U.name AS seller_name, SP.store_name, SP.grade AS seller_grade
+            SELECT L.listing_id,
+                   L.product_id,
+                   L.seller_id,
+                   L.listing_type,
+                   L.price,
+                   L.stock,
+                   L.status,
+                   L.condition,
+                   P.name   AS product_name,
+                   P.category,
+                   P.description,
+                   P.rating,
+                   P.image_url,
+                   U.name   AS seller_name,
+                   SP.store_name,
+                   SP.grade AS seller_grade
             FROM Listing L
-            JOIN Product P ON L.product_id = P.product_id
-            JOIN SellerProfile SP ON L.seller_id = SP.user_id
-            JOIN Users U ON SP.user_id = U.user_id
+                     JOIN Product P ON L.product_id = P.product_id
+                     JOIN SellerProfile SP ON L.seller_id = SP.user_id
+                     JOIN Users U ON SP.user_id = U.user_id
             WHERE L.listing_id = %s
             """,
             (listing_id,)
@@ -144,7 +187,7 @@ def show_product_detail(listing_id):
         data = cur.fetchone()
 
         if data:
-            # 데이터를 템플릿에 맞춰 구조화
+            # 데이터 구조화 (product, listing, seller) 유지...
             product = {
                 'id': data['product_id'],
                 'name': data['product_name'],
@@ -168,13 +211,46 @@ def show_product_detail(listing_id):
                 'seller_grade': data['seller_grade']
             }
 
-            # 2. 2차 판매자(Resale)일 경우 실물 이미지 조회
+            # 2. 2차 판매자(Resale)일 경우 실물 이미지 조회 (유지)
             if data['listing_type'] == 'Resale':
                 cur.execute(
                     "SELECT image_url, is_main FROM ListingImage WHERE listing_id = %s ORDER BY is_main DESC, image_id ASC",
                     (listing_id,)
                 )
                 resale_images = [dict(row) for row in cur.fetchall()]
+
+            # 3. ✨ 경매 상품일 경우 Auction 정보 조회 추가 ✨
+            if data['status'] in ['경매 중', '경매 예정']:
+                cur.execute(
+                    """
+                    SELECT auction_id,
+                           start_price,
+                           current_price,
+                           start_date,
+                           end_date,
+                           current_highest_bidder_id
+                    FROM Auction
+                    WHERE listing_id = %s
+                    """,
+                    (listing_id,)
+                )
+                auction_data = cur.fetchone()
+
+                if auction_data:
+                    # 조회된 결과를 auction 변수에 딕셔너리로 담습니다.
+                    auction = dict(auction_data)
+
+                    # 최고 입찰자 이름 조회 (선택 사항: 템플릿에서 bidder_name 사용 시)
+                    if auction['current_highest_bidder_id']:
+                        cur.execute(
+                            "SELECT name FROM Users WHERE user_id = %s",
+                            (auction['current_highest_bidder_id'],)
+                        )
+                        bidder_info = cur.fetchone()
+                        if bidder_info:
+                            auction['highest_bidder_name'] = bidder_info['name']
+                    else:
+                        auction['highest_bidder_name'] = None
 
         cur.close()
         conn.close()
@@ -185,16 +261,16 @@ def show_product_detail(listing_id):
             listing=listing,
             seller=seller,
             resale_images=resale_images,
-            listing_id=listing_id # 404 메시지를 위해 ID를 다시 전달
+            auction=auction,  # ✨ 조회한 auction 데이터를 템플릿에 전달합니다. ✨
+            listing_id=listing_id
         )
 
     except Exception as e:
+        # ... (오류 처리 유지) ...
         if conn:
             conn.close()
         print(f"상품 상세 조회 중 오류 발생: {str(e)}")
-        # 데이터베이스 오류 시 빈 데이터 반환 (템플릿에서 처리)
         return render_template('product_detail.html', product=None, listing_id=listing_id)
-
 #장바구니 페이지
 @app.route('/cart')
 def show_shopping_cart():
@@ -671,6 +747,7 @@ def auction_bid():
             (auction_id,)
         )
         auction_info = cur.fetchone()
+        current_highest_price = auction_info['current_price']
 
         if not auction_info:
             conn.rollback()
@@ -687,14 +764,24 @@ def auction_bid():
             return jsonify({"error": f"현재 '경매 중' 상태가 아닙니다. (현재 상태: {auction_info['status']})"}), 403
 
         # 3. 시간 검증
-        cur.execute("SELECT NOW()")
-        now = cur.fetchone()[0]
-        if not (auction_info['start_date'] <= now <= auction_info['end_date']):
+        # NOW()를 가져와 파이썬에서 비교하는 대신, DB에게 현재 시간이
+        # start_date와 end_date 사이에 있는지 물어봅니다.
+        cur.execute(
+            """
+            SELECT (NOW() AT TIME ZONE 'KST' BETWEEN "start_date" AND "end_date")
+            FROM Auction
+            WHERE auction_id = %s;
+            """,
+            (auction_id,)
+        )
+        is_valid_time = cur.fetchone()[0]
+
+        if not is_valid_time:
             conn.rollback()
-            return jsonify({"error": "경매 시간이 종료되었습니다."}), 403
+            return jsonify({"error": "경매 시간이 종료되었거나 시작되지 않았습니다."}), 403
 
         # 4. 입찰 가격 검증
-        if bid_price <= auction_info['current_price']:
+        if bid_price <= current_highest_price:
             conn.rollback()
             return jsonify({"error": f"입찰가는 현재 최고가({auction_info['current_price']})보다 높아야 합니다."}), 400
 

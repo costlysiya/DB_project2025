@@ -75,11 +75,53 @@
                     <h3 style="text-align: center; color: #dc3545;">🚫 품절된 상품입니다.</h3>
                 </div>
             {% elif listing.status in ['경매 중', '경매 예정'] %}
-                 <div class="purchase-form" style="background-color: #fcf8e3;">
-                    <h3 style="text-align: center; color: #f57f17;">🔥 경매가 진행 중인 상품입니다.</h3>
-                    <p style="text-align: center;">입찰을 통해 참여해주세요.</p>
-                    <!-- 입찰 버튼 (id는 auction_id가 필요함 -> 추가 쿼리 필요) -->
-                    <button type="button" class="btn secondary-btn" style="width: 100%;" onclick="alert('입찰 기능 구현 필요')">입찰하기</button>
+
+                <div class="auction-box">
+
+                    <h3 class="auction-status-title">
+                        {% if listing.status == '경매 중' %}
+                            🔥 경매 진행 중입니다.
+                        {% else %}
+                            ⏳ 경매 시작 예정입니다.
+                        {% endif %}
+                    </h3>
+
+                    <div class="auction-details-info">
+                        <p><strong>시작 시간:</strong> <span>{{ auction.start_date | datetime_format }}</span></p>
+                        <p><strong>마감 시간:</strong> <span id="auction-end-time">{{ auction.end_date | datetime_format }}</span></p>
+                    </div>
+
+                    <div class="current-bid-section">
+                        <span class="label">현재 최고 입찰가</span>
+                        <span class="price-value">{{ "{:,.0f}원".format(auction.current_price) }}</span>
+                        {% if auction.current_highest_bidder_id %}
+                            <p class="bidder-info">최고 입찰자: {{ auction.highest_bidder_name | default('익명', true) }}</p>
+                        {% else %}
+                            <p class="bidder-info">아직 입찰자가 없습니다. (시작가: {{ "{:,.0f}원".format(auction.start_price) }})</p>
+                        {% endif %}
+                    </div>
+
+                    {% if listing.status == '경매 중' and session.user_role == 'Buyer' %}
+                        <form id="bid-form" class="bid-form">
+                            <input type="hidden" name="auction_id" value="{{ auction.auction_id }}">
+
+                            <div class="bid-input-group">
+                                <label for="my_bid">내가 제시할 입찰가</label>
+                                <input type="number"
+                                        id="my_bid"
+                                        name="bid_price"
+                                        min="{{ auction.current_price + 1000 }}"
+                                        placeholder="{{ (auction.current_price + 1000) | number_format }}원 이상"
+                                        required>
+                            </div>
+
+                            <button type="submit" class="btn primary-btn bid-btn">입찰하기</button>
+                             <div id="bid-message" style="text-align: center; margin-top: 10px; font-weight: bold;"></div>
+                        </form>
+                    {% elif listing.status == '경매 중' and session.user_role != 'Buyer' %}
+                        <p style="text-align: center; font-weight: bold; color: #dc3545;">구매자만 입찰에 참여할 수 있습니다.</p>
+                    {% endif %}
+
                  </div>
             {% else %}
             <!--  재고가 있을 때만 구매 폼 활성화 -->
@@ -107,6 +149,63 @@
 
         </div>
     </div>
+
+    <script> // 경매관련
+        document.addEventListener('DOMContentLoaded', function() {
+            const bidForm = document.getElementById('bid-form');
+            const bidMessage = document.getElementById('bid-message');
+            const currentPriceSpan = document.querySelector('.price-value'); // 현재가 표시 요소
+
+            // 폼이 존재할 때만 실행
+            if (bidForm) {
+                const bidPriceInput = document.getElementById('my_bid'); // 폼 안에 있어야 함!
+
+                bidForm.addEventListener('submit', async function(event) {
+                    event.preventDefault(); // 기본 폼 제출(새로고침) 방지
+
+                    const data = {
+                        auction_id: parseInt(bidForm.auction_id.value),
+                        buyer_id: {{ session.user_id }}, // Flask 세션에서 가져온 사용자 ID
+                        bid_price: parseInt(bidPriceInput.value, 10)
+                    };
+
+                    bidMessage.textContent = '입찰 처리 중...';
+                    bidMessage.style.color = 'gray';
+
+                    try {
+                        const response = await fetch('/api/auction/bid', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(data)
+                        });
+
+                        const result = await response.json();
+
+                        if (response.ok) {
+                            bidMessage.textContent = result.message || "입찰 성공!";
+                            bidMessage.style.color = '#ff69b4';
+
+                            // 최고 입찰가 즉시 업데이트
+                            const newPrice = result.new_price;
+                            currentPriceSpan.textContent = newPrice.toLocaleString('ko-KR') + '원';
+
+                            // 다음 입찰을 위해 최소 입찰가 필드 업데이트
+                            bidPriceInput.min = newPrice + 1000;
+                            bidPriceInput.placeholder = (newPrice + 1000).toLocaleString('ko-KR') + '원 이상';
+
+                        } else {
+                            bidMessage.textContent = `❌ 오류: ${result.error || result.message}`;
+                            bidMessage.style.color = '#dc3545';
+                        }
+
+                    } catch (error) {
+                        bidMessage.textContent = '네트워크 오류가 발생했습니다.';
+                        bidMessage.style.color = '#dc3545';
+                    }
+                });
+            }
+        });
+    </script>
 
     <script>
         // 수량 변경 시 총 결제 금액 실시간 업데이트

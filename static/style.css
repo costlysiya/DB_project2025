@@ -160,6 +160,24 @@ footer {
 footer p {
     margin: 5px 0;
 }
+/* 일반적인 버튼 스타일 재정의 */
+.btn {
+    display: inline-block;
+    padding: 10px 15px;
+    border-radius: 5px;
+    text-align: center;
+    transition: background-color 0.3s, border-color 0.3s; /* border-color 트랜지션 추가 */
+    text-decoration: none !important;
+
+    /* ⚠️ 여기를 수정합니다. */
+    border: 1px solid #ff69b4; /* 기본 테두리를 로고 핑크색으로 설정 */
+    background-color: white; /* 배경색은 흰색으로 */
+    color: #ff69b4; /* 텍스트 색상도 핑크색으로 */
+}
+.btn:hover {
+    background-color: #ff69b4; /* 호버 시 배경색 핑크색 */
+    color: white !important; /* 호버 시 텍스트 흰색 */
+}
 
 /* 상품 목록 상단 헤더 */
 .product-list-header {
@@ -748,4 +766,21 @@ hr {
     padding-bottom: 10px;
     margin-bottom: 20px;
     color: #2c3e50;
+}
+/* static/style.css 에 추가/수정 */
+
+/* 상품 등록 완료 버튼 (.submit-btn) 스타일 적용 */
+.submit-btn {
+    /* 로고 색상인 핑크색으로 설정 */
+    background-color: #ff69b4 !important; /* ✨ !important 추가 ✨ */
+    color: white !important;
+
+    margin-top: 30px;
+    font-size: 1.1em;
+    padding: 12px;
+}
+
+.submit-btn:hover {
+    /* 마우스 오버 시 약간 어두운 핑크색으로 변경 */
+    background-color: #e05e9e !important; /* ✨ !important 추가 ✨ */
 }
