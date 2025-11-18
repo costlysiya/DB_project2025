@@ -74,7 +74,8 @@ app.jinja_env.filters['number_format'] = format_number
 #DB에서 상품을 조회하는 공통 함수
 # app.py 파일 내 get_products_from_db 함수
 
-def get_products_from_db(category=None, search_term=None, auction_only=False):
+# DB에서 상품을 조회하는 공통 함수
+def get_products_from_db(category=None, search_term=None, auction_only=False, sort_by='latest'):
     conn = get_db_connection()
     if conn is None:
         return [], 0
@@ -83,60 +84,41 @@ def get_products_from_db(category=None, search_term=None, auction_only=False):
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        # 1. ✨ SQL SELECT 부분 정의: 실시간 상태 계산 ✨
-        sql_select = """
-                     SELECT 
-                        L.listing_id, L.listing_type, L.price, L.stock, L.condition, L.status,
-                        P.product_id, P.name AS product_name, P.category, P.rating AS product_rating, P.image_url,
-                        U.name AS seller_name, SP.grade AS seller_grade,
-                        A.end_date, A.auction_id, 
-                        
-                        -- 최종 listing_status 계산 (경매 마감 여부 체크)
-                        CASE
-                            WHEN L.listing_type = 'Resale' AND A.auction_id IS NOT NULL 
-                                 AND NOW() AT TIME ZONE 'KST' > A.end_date THEN '판매 종료'
-                            WHEN L.stock = 0 THEN '품절'
-                            ELSE L.status
-                        END AS listing_status
-                    FROM Listing L
-                    JOIN Product P ON L.product_id = P.product_id
-                    JOIN Users U ON L.seller_id = U.user_id
-                    JOIN SellerProfile SP ON U.user_id = SP.user_id
-                    LEFT JOIN Auction A ON L.listing_id = A.listing_id
-                """
-
-        sql_query = sql_select
+        sql_query = "SELECT * FROM V_All_Products"
         conditions = []
         params = []
 
         # 2. 동적 WHERE 조건 추가 및 조합 (유지)
         if category:
-            conditions.append("P.category = %s")
+            conditions.append("category = %s")
             params.append(category)
         if search_term:
-            conditions.append("P.name LIKE %s")
+            conditions.append("product_name LIKE %s")
             params.append(f"%{search_term}%")
 
         # 경매 전용 필터: L.status가 경매 중/예정이거나 L.status가 '판매 종료'인 경우를 포함합니다.
         if auction_only:
             # 여기서 '판매 종료'는 경매 마감으로 인해 이미 업데이트된 상태를 포함합니다.
-            conditions.append("L.listing_type = 'Resale' AND L.status IN ('경매 중', '경매 예정', '판매 종료')")
+            conditions.append("listing_type = 'Resale' AND listing_status IN ('경매 중', '경매 예정', '판매 종료')")
 
         if conditions:
             sql_query += " WHERE " + " AND ".join(conditions)
 
-        sql_query += " ORDER BY L.listing_id DESC"
+        #정렬 로직 추가: sort_by 값에 따라 ORDER BY 절을 동적으로 변경
+        if sort_by == 'low_price':
+            order_clause = " ORDER BY price ASC"
+        elif sort_by == 'high_price':
+            order_clause = " ORDER BY price DESC"
+        elif sort_by == 'rating':
+            # 굿즈 등급(product_rating) 순으로 정렬 (S > A > B...)
+            order_clause = " ORDER BY product_rating DESC NULLS LAST, listing_id DESC"
+        else :
+            order_clause = " ORDER BY listing_id DESC"  # 기본: 최신 등록순
+        sql_query += order_clause
 
         cur.execute(sql_query, tuple(params))
         products_raw = cur.fetchall()
         products = [dict(product) for product in products_raw]
-
-        # ✨ 여기서 각 상품의 listing_status를 최종 계산된 값으로 덮어씁니다. ✨
-        for product in products:
-            if 'listing_status' in product and product['listing_status'] == '판매 종료':
-                # 경매 종료 시 stock이 0이 아닐 경우 품절로 명시적으로 처리
-                if product['stock'] > 0:
-                    product['stock'] = 0
 
         cur.close()
         conn.close()
@@ -348,27 +330,35 @@ def load_user_data_to_session():
 # --- 메인 페이지 (전체 상품) ---
 @app.route('/')
 def show_main_page():
+    # 정렬 기준 가져오기
+    sort_by = request.args.get('sort_by', 'latest')
+
     # '전체 상품'을 조회
-    products, product_count = get_products_from_db()
+    products, product_count = get_products_from_db(sort_by=sort_by)
 
     return render_template(
         'index.html',
         products=products,
         product_count=product_count,
-        page_title="전체 상품"  # 페이지 제목 동적 변경
+        page_title="전체 상품",
+        sort_by=sort_by
     )
 
 # --- 카테고리별 상품 페이지 ---
 @app.route('/category/<category_name>')
 def show_category_page(category_name):
+    # 정렬 기준 가져오기
+    sort_by = request.args.get('sort_by', 'latest')
+
     # '카테고리'로 필터링하여 상품 조회
-    products, product_count = get_products_from_db(category=category_name)
+    products, product_count = get_products_from_db(category=category_name, sort_by=sort_by)
 
     return render_template(
         'index.html',
         products=products,
         product_count=product_count,
-        page_title=f"{category_name} 상품"  # 페이지 제목 동적 변경
+        page_title=f"{category_name} 상품",
+        sort_by=sort_by
     )
 
 # --- 상품 상세 페이지 ---
@@ -593,19 +583,21 @@ def show_shopping_cart():
         return render_template('shopping_cart.html', cart_items=[], total_price=0, shipping_fee=0)
 
 
-# --- 검색 결과 페이지 ---
+# --- 상품 검색 라우터 ---
 @app.route('/search')
 def search_products():
     search_query = request.args.get('query')
+    sort_by = request.args.get('sort_by', 'latest')
 
     # '검색어'로 필터링하여 상품 조회
-    products, product_count = get_products_from_db(search_term=search_query)
+    products, product_count = get_products_from_db(search_term=search_query, sort_by=sort_by)
 
     return render_template(
         'index.html',
         products=products,
         product_count=product_count,
-        page_title=f"'{search_query}' 검색 결과"  # 페이지 제목 동적 변경
+        page_title=f"'{search_query}' 검색 결과",
+        sort_by=sort_by
     )
 
 
@@ -633,17 +625,21 @@ def show_product_register_page():
 
     return render_template('seller_listing.html')
 
-#경매/리셀 페이지
+
+# --- 경매/리셀 페이지 ---
 @app.route('/resale/auction')
 def show_auction_page():
+    sort_by = request.args.get('sort_by', 'latest')
+
     # '경매 중' 또는 '경매 예정' 상품만 조회
-    products, product_count = get_products_from_db(auction_only=True)
+    products, product_count = get_products_from_db(auction_only=True, sort_by=sort_by)
 
     return render_template(
         'index.html',
         products=products,
         product_count=product_count,
-        page_title="🔥 경매 / 리셀 상품"  # 페이지 제목 동적 변경
+        page_title="🔥 경매 / 리셀 상품",
+        sort_by=sort_by  # (★) 템플릿에 전달하여 선택 상태 유지
     )
 
 # 로그아웃 페이지

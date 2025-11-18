@@ -6,15 +6,16 @@
 
     <div class="product-list-header">
         <!-- 상품 개수를 동적으로 표시 -->
-        <span class="product-count">{{page_title}}: {{ product_count }}개</span>
+        <span class="product-count">{{ page_title | default('전체 상품') }}: {{ product_count }}개</span>
 
         <div class="sorting-options">
-            <select name="sort_by">
-                <option value="latest">최신 등록순</option>
-                <option value="low_price">낮은 가격순</option>
-                <option value="high_price">높은 가격순</option>
-                {% if user
-                <option value="rating">굿즈 등급순 (Rating)</option>
+            <select name="sort_by" id="sort-select">
+                <option value="latest" {% if sort_by == 'latest' %}selected{% endif %}>최신 등록순</option>
+                <option value="low_price" {% if sort_by == 'low_price' %}selected{% endif %}>낮은 가격순</option>
+                <option value="high_price" {% if sort_by == 'high_price' %}selected{% endif %}>높은 가격순</option>
+                {% if session.user_role == 'PrimarySeller' %}
+                <option value="rating" {% if sort_by == 'rating' %}selected{% endif %}>굿즈 등급순 (Rating)</option>
+                {% endif %}
             </select>
         </div>
     </div>
@@ -39,7 +40,7 @@
         ">
 
             <!-- 링크와 이미지 동적 설정 -->
-            <a href="/product/{{ product.listing_id }}">
+            <a href="{{ url_for('show_product_detail', listing_id=product.listing_id) }}">
                 <div class="card-image"
                      style="background-image: url('{{ product.image_url | default('https://placehold.co/600x400/eee/ccc?text=No+Image', true) }}');">
 
@@ -56,12 +57,18 @@
                 <!-- 카테고리 -->
                 <p class="category">{{ product.category }}</p>
                 <!-- 상품명 -->
-                <h4 class="product-name"><a href="/product/{{ product.listing_id }}">{{ product.product_name }}</a></h4>
+                <h4 class="product-name">
+                    <a href="{{ url_for('show_product_detail', listing_id=product.listing_id) }}">{{ product.product_name }}</a>
+
+                    {% if session.user_role == 'PrimarySeller' and product.product_rating %}
+                        <span style="font-size: 0.9em; color: #ff69b4;">({{ product.product_rating }} 등급)</span>
+                    {% endif %}
+                </h4>
                 <!-- 판매자 정보 -->
                 <p class="seller-info">{{ product.seller_name }} ({{ product.seller_grade | default('N/A', true) }})</p>
                 <!-- 가격 (경매/일반 판매 분기) -->
                 {% if product.listing_status in ['경매 중', '경매 예정'] %}
-                    <p class="product-price auction-price">현재가: {{ "{:,.0f}원".format(product.price) }}</p>
+                    <p class="product-price auction-price">현재가: {{ "{:,.0f}원".format(product.current_price or product.price) }}</p>
                 {% else %}
                     <p class="product-price">{{ "{:,.0f}원".format(product.price) }}</p>
                 {% endif %}
@@ -86,4 +93,20 @@
         {% endfor %} <!-- for 루프 끝 -->
 
     </div>
+<script>
+    document.getElementById('sort-select').addEventListener('change', function() {
+        const sortBy = this.value;
+
+        // 1. 현재 URL의 Path와 Query String을 가져옴
+        // 예: /category/음반?search=포카
+        const currentPath = window.location.pathname;
+        const currentSearchParams = new URLSearchParams(window.location.search);
+
+        // 2. 기존 파라미터(category, search 등)를 유지하면서 sort_by만 변경/추가
+        currentSearchParams.set('sort_by', sortBy);
+
+        // 3. 페이지 이동 (Path + 업데이트된 Query String)
+        window.location.href = currentPath + '?' + currentSearchParams.toString();
+    });
+</script>
 {% endblock %}
