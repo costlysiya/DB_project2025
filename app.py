@@ -4,6 +4,7 @@ from psycopg2 import extras
 import os
 import datetime
 from decimal import Decimal
+
 app = Flask(__name__)
 
 # --- 세션 사용을 위한 secret_key 설정 ---
@@ -43,6 +44,7 @@ def check_db_connection():
             return False
     return False
 
+
 def format_datetime(value, format='%Y-%m-%d %H:%M:%S'):
     """ datetime 객체를 지정된 포맷의 문자열로 변환하는 필터 """
     if value is None:
@@ -53,8 +55,10 @@ def format_datetime(value, format='%Y-%m-%d %H:%M:%S'):
     # 문자열 등 다른 타입일 경우 그대로 반환
     return str(value)
 
+
 # Flask 앱에 필터 등록
 app.jinja_env.filters['datetime_format'] = format_datetime
+
 
 def format_number(value):
     """ 숫자를 천 단위 쉼표로 포맷팅하는 필터 """
@@ -67,11 +71,12 @@ def format_number(value):
         # 숫자가 아닌 경우 그대로 반환
         return str(value)
 
+
 # Flask 앱에 필터 등록
 app.jinja_env.filters['number_format'] = format_number
 
 
-#DB에서 상품을 조회하는 공통 함수
+# DB에서 상품을 조회하는 공통 함수
 # app.py 파일 내 get_products_from_db 함수
 
 def get_products_from_db(category=None, search_term=None, auction_only=False):
@@ -83,60 +88,32 @@ def get_products_from_db(category=None, search_term=None, auction_only=False):
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        # 1. ✨ SQL SELECT 부분 정의: 실시간 상태 계산 ✨
-        sql_select = """
-                     SELECT 
-                        L.listing_id, L.listing_type, L.price, L.stock, L.condition, L.status,
-                        P.product_id, P.name AS product_name, P.category, P.rating AS product_rating, P.image_url,
-                        U.name AS seller_name, SP.grade AS seller_grade,
-                        A.end_date, A.auction_id, 
-                        
-                        -- 최종 listing_status 계산 (경매 마감 여부 체크)
-                        CASE
-                            WHEN L.listing_type = 'Resale' AND A.auction_id IS NOT NULL 
-                                 AND NOW() AT TIME ZONE 'KST' > A.end_date THEN '판매 종료'
-                            WHEN L.stock = 0 THEN '품절'
-                            ELSE L.status
-                        END AS listing_status
-                    FROM Listing L
-                    JOIN Product P ON L.product_id = P.product_id
-                    JOIN Users U ON L.seller_id = U.user_id
-                    JOIN SellerProfile SP ON U.user_id = SP.user_id
-                    LEFT JOIN Auction A ON L.listing_id = A.listing_id
-                """
-
-        sql_query = sql_select
+        sql_query = "SELECT * FROM V_All_Products"
         conditions = []
         params = []
 
         # 2. 동적 WHERE 조건 추가 및 조합 (유지)
         if category:
-            conditions.append("P.category = %s")
+            conditions.append("category = %s")
             params.append(category)
         if search_term:
-            conditions.append("P.name LIKE %s")
+            conditions.append("product_name LIKE %s")
             params.append(f"%{search_term}%")
 
         # 경매 전용 필터: L.status가 경매 중/예정이거나 L.status가 '판매 종료'인 경우를 포함합니다.
         if auction_only:
             # 여기서 '판매 종료'는 경매 마감으로 인해 이미 업데이트된 상태를 포함합니다.
-            conditions.append("L.listing_type = 'Resale' AND L.status IN ('경매 중', '경매 예정', '판매 종료')")
+            conditions.append("listing_type = 'Resale' AND listing_status IN ('경매 중', '경매 예정', '판매 종료')")
 
         if conditions:
             sql_query += " WHERE " + " AND ".join(conditions)
 
-        sql_query += " ORDER BY L.listing_id DESC"
+        sql_query += " ORDER BY listing_id DESC"
 
         cur.execute(sql_query, tuple(params))
         products_raw = cur.fetchall()
         products = [dict(product) for product in products_raw]
 
-        # ✨ 여기서 각 상품의 listing_status를 최종 계산된 값으로 덮어씁니다. ✨
-        for product in products:
-            if 'listing_status' in product and product['listing_status'] == '판매 종료':
-                # 경매 종료 시 stock이 0이 아닐 경우 품절로 명시적으로 처리
-                if product['stock'] > 0:
-                    product['stock'] = 0
 
         cur.close()
         conn.close()
@@ -149,7 +126,7 @@ def get_products_from_db(category=None, search_term=None, auction_only=False):
     return products, len(products)
 
 
-#사용자 정보 가져오는 함수
+# 사용자 정보 가져오는 함수
 def get_user_profile_data(user_id, role):
     conn = get_db_connection()
     if conn is None:
@@ -164,7 +141,7 @@ def get_user_profile_data(user_id, role):
         user_data = cur.fetchone()
         if user_data:
             user_profile['user']['name'] = user_data['name']
-            user_profile['user']['role'] = user_data['role'] # 혹시 세션과 다를 경우 갱신
+            user_profile['user']['role'] = user_data['role']  # 혹시 세션과 다를 경우 갱신
 
         # 2. 역할별 상세 프로필 조회
         if role == 'Buyer':
@@ -173,8 +150,8 @@ def get_user_profile_data(user_id, role):
         elif role in ['PrimarySeller', 'Reseller']:
             cur.execute("SELECT store_name, grade FROM SellerProfile WHERE user_id = %s", (user_id,))
             user_profile['seller_profile'] = dict(cur.fetchone()) if cur.rowcount > 0 else {}
-        else: # Administrator
-            user_profile['admin_profile'] = {} # 관리자는 특별 프로필 정보 없음
+        else:  # Administrator
+            user_profile['admin_profile'] = {}  # 관리자는 특별 프로필 정보 없음
 
         cur.close()
         conn.close()
@@ -186,7 +163,8 @@ def get_user_profile_data(user_id, role):
         print(f"마이페이지 프로필 조회 중 오류 발생: {str(e)}")
         return None
 
-#주문 목록 조회 함수 (구매자 전용)
+
+# 주문 목록 조회 함수 (구매자 전용)
 def get_orders_for_buyer(user_id):
     conn = get_db_connection()
     if conn is None:
@@ -195,20 +173,21 @@ def get_orders_for_buyer(user_id):
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         cur.execute("""
-            SELECT 
-                O.order_id,
-                O.quantity, 
-                O.total_price, 
-                O.order_date, 
-                O.status,
-                V.product_name, 
-                V.seller_name,
-                V.image_url,
-                V.listing_id
-            FROM orderb O, v_all_products V
-            WHERE O.buyer_id = %s and O.listing_id = V.listing_id
-            ORDER BY O.order_date DESC;
-            """, (user_id,))
+                    SELECT O.order_id,
+                           O.quantity,
+                           O.total_price,
+                           O.order_date,
+                           O.status,
+                           V.product_name,
+                           V.seller_name,
+                           V.image_url,
+                           V.listing_id
+                    FROM orderb O,
+                         v_all_products V
+                    WHERE O.buyer_id = %s
+                      and O.listing_id = V.listing_id
+                    ORDER BY O.order_date DESC;
+                    """, (user_id,))
         orders = [dict(row) for row in cur.fetchall()]
         cur.close()
         conn.close()
@@ -231,27 +210,26 @@ def get_sales_for_seller(user_id):
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         # 해당 판매자(user_id)가 등록한 listing_id를 통해 들어온 주문을 조회
         cur.execute("""
-            SELECT 
-                O.order_id,
-                O.quantity, 
-                O.total_price, 
-                O.order_date, 
-                O.status,
-                V.product_name, 
-                V.seller_name,
-                V.image_url,
-                V.listing_id,
-                U.name AS buyer_name,
-                U.user_uid AS buyer_uid,
-                B.address as address
-            FROM orderb O
-            JOIN v_all_products V ON O.listing_id = V.listing_id
-            JOIN Listing L ON O.listing_id = L.listing_id
-            JOIN Users U ON O.buyer_id = U.user_id -- 구매자 정보 조회용
-            Join buyerprofile B on O.buyer_id = B.user_id
-            WHERE L.seller_id = %s
-            ORDER BY O.order_date DESC;
-            """, (user_id,))
+                    SELECT O.order_id,
+                           O.quantity,
+                           O.total_price,
+                           O.order_date,
+                           O.status,
+                           V.product_name,
+                           V.seller_name,
+                           V.image_url,
+                           V.listing_id,
+                           U.name     AS buyer_name,
+                           U.user_uid AS buyer_uid,
+                           B.address  as address
+                    FROM orderb O
+                             JOIN v_all_products V ON O.listing_id = V.listing_id
+                             JOIN Listing L ON O.listing_id = L.listing_id
+                             JOIN Users U ON O.buyer_id = U.user_id -- 구매자 정보 조회용
+                             Join buyerprofile B on O.buyer_id = B.user_id
+                    WHERE L.seller_id = %s
+                    ORDER BY O.order_date DESC;
+                    """, (user_id,))
 
         sales_orders = [dict(row) for row in cur.fetchall()]
 
@@ -265,6 +243,7 @@ def get_sales_for_seller(user_id):
         print(f"판매자 주문 내역 조회 중 오류 발생: {str(e)}")
         return []
 
+
 def get_my_products_list(user_id):
     conn = get_db_connection()
     if conn is None:
@@ -274,18 +253,19 @@ def get_my_products_list(user_id):
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         cur.execute("""
-            SELECT 
-                V.listing_id,
-                V.product_name, 
-                V.category,
-                V.image_url,
-                V.price,
-                V.stock,
-                V.listing_status,
-                V.condition
-            FROM listing L, v_all_products V  
-            WHERE L.listing_id = V.listing_id and L.seller_id = %s
-            """, (user_id,))
+                    SELECT V.listing_id,
+                           V.product_name,
+                           V.category,
+                           V.image_url,
+                           V.price,
+                           V.stock,
+                           V.listing_status,
+                           V.condition
+                    FROM listing L,
+                         v_all_products V
+                    WHERE L.listing_id = V.listing_id
+                      and L.seller_id = %s
+                    """, (user_id,))
 
         my_products = [dict(row) for row in cur.fetchall()]
         cur.close()
@@ -296,6 +276,7 @@ def get_my_products_list(user_id):
             conn.close()
         print(f"판매자 판매 상품 조회 중 오류 발생: {str(e)}")
         return []
+
 
 # 장바구니 수량 계산 함수
 def calculate_cart_count(user_id):
@@ -342,8 +323,7 @@ def load_user_data_to_session():
     g.session = session  # 모든 템플릿에서 session을 사용할 수 있도록 보장 (선택적)
 
 
-
-#페이지 렌더링 라우터 (HTML)
+# 페이지 렌더링 라우터 (HTML)
 
 # --- 메인 페이지 (전체 상품) ---
 @app.route('/')
@@ -358,6 +338,7 @@ def show_main_page():
         page_title="전체 상품"  # 페이지 제목 동적 변경
     )
 
+
 # --- 카테고리별 상품 페이지 ---
 @app.route('/category/<category_name>')
 def show_category_page(category_name):
@@ -371,6 +352,7 @@ def show_category_page(category_name):
         page_title=f"{category_name} 상품"  # 페이지 제목 동적 변경
     )
 
+
 # --- 상품 상세 페이지 ---
 @app.route('/product/<int:listing_id>')
 def show_product_detail(listing_id):
@@ -383,7 +365,7 @@ def show_product_detail(listing_id):
     seller = None
     resale_images = []
     auction = None  # ✨ 경매 변수 초기화 ✨
-    is_auction_ended = False #경매 완료 확인
+    is_auction_ended = False  # 경매 완료 확인
 
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -495,7 +477,6 @@ def show_product_detail(listing_id):
                         # 템플릿 렌더링을 위해 상태를 임시로 변경
                         listing['status'] = '판매 종료'
 
-
         cur.close()
         conn.close()
 
@@ -516,7 +497,9 @@ def show_product_detail(listing_id):
             conn.close()
         print(f"상품 상세 조회 중 오류 발생: {str(e)}")
         return render_template('product_detail.html', product=None, listing_id=listing_id)
-#장바구니 페이지
+
+
+# 장바구니 페이지
 @app.route('/cart')
 def show_shopping_cart():
     # 1. 로그인 확인 (장바구니는 로그인 필수)
@@ -536,13 +519,17 @@ def show_shopping_cart():
         # 2. 장바구니 데이터와 연결된 상품/판매 목록 정보를 한 번에 조회
         cur.execute(
             """
-            SELECT 
-                SC.cart_id, SC.quantity, 
-                L.listing_id, L.price, L.listing_type, L.stock,
-                P.name AS product_name, P.image_url
+            SELECT SC.cart_id,
+                   SC.quantity,
+                   L.listing_id,
+                   L.price,
+                   L.listing_type,
+                   L.stock,
+                   P.name AS product_name,
+                   P.image_url
             FROM ShoppingCart SC
-            JOIN Listing L ON SC.listing_id = L.listing_id
-            JOIN Product P ON L.product_id = P.product_id
+                     JOIN Listing L ON SC.listing_id = L.listing_id
+                     JOIN Product P ON L.product_id = P.product_id
             WHERE SC.buyer_id = %s
             ORDER BY SC.cart_id DESC
             """,
@@ -633,7 +620,8 @@ def show_product_register_page():
 
     return render_template('seller_listing.html')
 
-#경매/리셀 페이지
+
+# 경매/리셀 페이지
 @app.route('/resale/auction')
 def show_auction_page():
     # '경매 중' 또는 '경매 예정' 상품만 조회
@@ -646,6 +634,7 @@ def show_auction_page():
         page_title="🔥 경매 / 리셀 상품"  # 페이지 제목 동적 변경
     )
 
+
 # 로그아웃 페이지
 @app.route('/logout', methods=['GET'])
 def logout_user():
@@ -654,6 +643,7 @@ def logout_user():
     session.pop('user_role', None)
     # 로그아웃 후 로그인 페이지로 이동
     return redirect(url_for('show_login_page'))
+
 
 # 마이 페이지
 @app.route('/mypage', methods=['GET'])
@@ -679,15 +669,15 @@ def show_mypage():
     template_data = {
         "user_profile": user_profile,
         "view": current_view,
-        "orders": [], # 기본값
-        "sales_orders": [], # 기본값
-        "my_products": [] #기본값
+        "orders": [],  # 기본값
+        "sales_orders": [],  # 기본값
+        "my_products": []  # 기본값
     }
     if current_view == 'orders' and user_role == 'Buyer':
         template_data["orders"] = get_orders_for_buyer(user_id)
-    elif current_view == 'sales' and user_role in ['PrimarySeller','Reseller']:
+    elif current_view == 'sales' and user_role in ['PrimarySeller', 'Reseller']:
         template_data["sales_orders"] = get_sales_for_seller(user_id)
-    elif current_view == 'my_products' and user_role in ['PrimarySeller','Reseller']:
+    elif current_view == 'my_products' and user_role in ['PrimarySeller', 'Reseller']:
         template_data["my_products"] = get_my_products_list(user_id)
         # 5. 템플릿 렌더링
     return render_template('mypage.html', **template_data)
@@ -778,9 +768,11 @@ def login_user():
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         sql_query = """
-            SELECT user_id, name, role FROM Users 
-            WHERE user_uid = %s AND password = %s
-        """
+                    SELECT user_id, name, role \
+                    FROM Users
+                    WHERE user_uid = %s \
+                      AND password = %s \
+                    """
         cur.execute(sql_query, (user_uid, password))
         user = cur.fetchone()
 
@@ -807,7 +799,6 @@ def login_user():
         if conn:
             conn.close()
         return jsonify({"error": f"로그인 중 오류 발생: {str(e)}"}), 500
-
 
 
 # --- 세션 확인 API (개발 테스트용) ---
@@ -886,10 +877,9 @@ def product_register():
             if seller_role == 'PrimarySeller' and (description or master_image_url):
                 cur.execute(
                     """
-                    UPDATE Product 
-                    SET 
-                        description = COALESCE(%s, description), 
-                        image_url = COALESCE(%s, image_url)
+                    UPDATE Product
+                    SET description = COALESCE(%s, description),
+                        image_url   = COALESCE(%s, image_url)
                     WHERE product_id = %s
                     """,
                     (description, master_image_url, product_id)
@@ -897,9 +887,8 @@ def product_register():
         else:
             cur.execute(
                 """
-                INSERT INTO Product (name, category, description, image_url) 
-                VALUES (%s, %s, %s, %s) 
-                RETURNING product_id
+                INSERT INTO Product (name, category, description, image_url)
+                VALUES (%s, %s, %s, %s) RETURNING product_id
                 """,
                 (product_name, category, description, master_image_url)
             )
@@ -916,7 +905,8 @@ def product_register():
 
             cur.execute(
                 """
-                SELECT 1 FROM Listing
+                SELECT 1
+                FROM Listing
                 WHERE product_id = %s
                   AND listing_type = 'Primary'
                   AND status IN ('판매중', '경매 예정', '경매 중')
@@ -929,9 +919,8 @@ def product_register():
 
         cur.execute(
             """
-            INSERT INTO Listing (product_id, seller_id, listing_type, price, stock, status, condition) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            RETURNING listing_id
+            INSERT INTO Listing (product_id, seller_id, listing_type, price, stock, status, condition)
+            VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING listing_id
             """,
             (product_id, seller_id, listing_type, price, stock, listing_status, condition)
         )
@@ -948,7 +937,8 @@ def product_register():
         if seller_role == 'Reseller' and is_auction:
             cur.execute(
                 """
-                INSERT INTO Auction (listing_id, start_price, current_price, start_date, end_date, current_highest_bidder_id)
+                INSERT INTO Auction (listing_id, start_price, current_price, start_date, end_date,
+                                     current_highest_bidder_id)
                 VALUES (%s, %s, %s, %s, %s, NULL)
                 """,
                 (listing_id, auction_start_price, auction_start_price, auction_start_date, auction_end_date)
@@ -1022,9 +1012,9 @@ def auction_bid():
             """
             SELECT A.current_price, A.start_date, A.end_date, L.status, L.seller_id
             FROM Auction A
-            JOIN Listing L ON A.listing_id = L.listing_id
+                     JOIN Listing L ON A.listing_id = L.listing_id
             WHERE A.auction_id = %s
-            FOR UPDATE 
+                FOR UPDATE
             """,
             (auction_id,)
         )
@@ -1112,9 +1102,9 @@ def finalize_auction():
             """
             SELECT A.listing_id, A.current_price, A.current_highest_bidder_id, A.end_date, L.status
             FROM Auction A
-            JOIN Listing L ON A.listing_id = L.listing_id
+                     JOIN Listing L ON A.listing_id = L.listing_id
             WHERE A.auction_id = %s
-            FOR UPDATE
+                FOR UPDATE
             """,
             (auction_id,)
         )
@@ -1154,8 +1144,7 @@ def finalize_auction():
             cur.execute(
                 """
                 INSERT INTO Orderb (buyer_id, listing_id, quantity, total_price, status)
-                VALUES (%s, %s, 1, %s, '상품 준비중')
-                RETURNING order_id
+                VALUES (%s, %s, 1, %s, '상품 준비중') RETURNING order_id
                 """,
                 (winner_id, listing_id, final_price)
             )
@@ -1183,7 +1172,6 @@ def finalize_auction():
     finally:
         cur.close()
         conn.close()
-
 
 
 # --- 장바구니에 상품 추가 API ---
@@ -1294,9 +1282,10 @@ def update_cart():
                 """
                 SELECT L.stock, L.status, SC.listing_id
                 FROM ShoppingCart SC
-                JOIN Listing L ON SC.listing_id = L.listing_id
-                WHERE SC.cart_id = %s AND SC.buyer_id = %s
-                FOR UPDATE
+                         JOIN Listing L ON SC.listing_id = L.listing_id
+                WHERE SC.cart_id = %s
+                  AND SC.buyer_id = %s
+                    FOR UPDATE
                 """,
                 (cart_id, buyer_id)
             )
@@ -1352,8 +1341,10 @@ def remove_cart_item():
         # IN 연산자를 사용하여 한 번에 여러 항목 삭제 (소유권 검증 포함)
         cur.execute(
             """
-            DELETE FROM ShoppingCart 
-            WHERE cart_id IN %s AND buyer_id = %s
+            DELETE
+            FROM ShoppingCart
+            WHERE cart_id IN %s
+              AND buyer_id = %s
             """,
             (tuple(cart_ids), buyer_id)
         )
@@ -1463,8 +1454,7 @@ def place_order():
             cur.execute(
                 """
                 INSERT INTO Orderb (buyer_id, listing_id, quantity, total_price, status)
-                VALUES (%s, %s, %s, %s, '상품 준비중')
-                RETURNING order_id
+                VALUES (%s, %s, %s, %s, '상품 준비중') RETURNING order_id
                 """,
                 (buyer_id, detail['listing_id'], detail['quantity'], detail['item_total'])
             )
@@ -1475,8 +1465,10 @@ def place_order():
         if cart_ids:
             cur.execute(
                 """
-                DELETE FROM ShoppingCart 
-                WHERE cart_id IN %s AND buyer_id = %s
+                DELETE
+                FROM ShoppingCart
+                WHERE cart_id IN %s
+                  AND buyer_id = %s
                 """,
                 (tuple(cart_ids), buyer_id)
             )
@@ -1525,9 +1517,10 @@ def update_order_status():
             """
             SELECT O.status, O.order_id
             FROM Orderb O
-            JOIN Listing L ON O.listing_id = L.listing_id
-            WHERE O.order_id = %s AND L.seller_id = %s
-            FOR UPDATE
+                     JOIN Listing L ON O.listing_id = L.listing_id
+            WHERE O.order_id = %s
+              AND L.seller_id = %s
+                FOR UPDATE
             """,
             (order_id, seller_id)
         )
@@ -1635,6 +1628,7 @@ def api_update_profile():
     finally:
         cur.close()
         conn.close()
+
 
 if __name__ == '__main__':
     # 디버그 모드를 켜고 실행
