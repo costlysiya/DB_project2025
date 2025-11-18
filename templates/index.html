@@ -60,7 +60,7 @@
                 <h4 class="product-name">
                     <a href="{{ url_for('show_product_detail', listing_id=product.listing_id) }}">{{ product.product_name }}</a>
 
-                    {% if session.user_role == 'PrimarySeller' and product.product_rating %}
+                    {% if session.user_role in ['PrimarySeller', 'Administrator'] and product.product_rating %}
                         <span style="font-size: 0.9em; color: #ff69b4;">({{ product.product_rating }} 등급)</span>
                     {% endif %}
                 </h4>

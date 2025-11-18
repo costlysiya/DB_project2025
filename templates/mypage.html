@@ -106,47 +106,134 @@
                 {% endif %}
 
             {% elif view == 'my_products' %}
-                <!--상품 목록 (Seller)-->
-                <h3>📈 내 상품 목록 (재고 관리)</h3>
-                {% if my_products %}
-                    <p>총 {{ my_products | length }}건의 상품이 있습니다.</p>
-                    <table class="order-history-table">
-                        <thead>
-                            <tr>
-                                <th>상품 정보</th>
-                                <th>카테고리</th>
-                                <th>가격</th>
-                                <th>재고</th>
-                                <th>판매 상태</th>
-                                <th>상태</th>
-                                <th>관리</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for product in my_products %}
-                            <tr data-listing-id="{{ product.listing_id }}">
-                                <td>
-                                    <a href="{{ url_for('show_product_detail', listing_id=product.listing_id) }}" style="display: flex; align-items: center;">
-                                        <img src="{{ product.image_url | default('https://placehold.co/60x60/eee/ccc?text=Goods', true) }}" alt="{{ product.product_name }}" width="40" height="40" style="margin-right: 10px; border-radius: 4px;">
-                                        {{ product.product_name }}
-                                    </a>
-                                </td>
-                                <td>{{ product.category }}</td>
-                                <td>{{ "{:,.0f}원".format(product.price) }}</td>
-                                <td>{{ product.stock }}개</td>
-                                <td>{{ product.listing_status }}</td>
-                                <td>{{ product.condition | default('-') }}</td>
-                                <td>
-                                    <!-- TODO: 상품 수정 페이지 링크 -->
-                                    <button class="btn secondary-btn" onclick="alert('상품 수정 페이지로 이동')">수정</button>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                {% else %}
-                    <p>등록한 상품이 없습니다. <a href="{{ url_for('show_product_register_page') }}">상품을 등록</a>해보세요.</p>
-                {% endif %}
+            <!--상품 목록 (Seller)-->
+            <h3>📈 내 상품 목록 (재고 관리)</h3>
+
+            <!-- (★) AJAX 메시지 표시 영역 -->
+            <div id="update-message-area" style="margin: 15px 0; padding: 10px; border-radius: 6px; display: none; font-weight: bold;"></div>
+
+            {% if my_products %}
+                <p>총 {{ my_products | length }}건의 상품이 있습니다.</p>
+                <table class="order-history-table">
+                    <thead>
+                        <tr>
+                            <th>상품 정보 (이름)</th>
+                            <th>카테고리</th>
+                            <th>가격 (원)</th>
+                            <th>재고 (개)</th>
+                            <th>판매 상태</th>
+                            <th>컨디션</th>
+                            <th>관리</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for product in my_products %}
+                        <!--JavaScript가 행(row)을 찾을 수 있도록 ID 부여 -->
+                        <tr id="row-{{ product.listing_id }}">
+                            <!-- Product ID를 숨겨둠 (업데이트 시 필요) -->
+                            <input type="hidden" class="product-id-input" value="{{ product.product_id }}">
+
+                            <td>
+                                <a href="{{ url_for('show_product_detail', listing_id=product.listing_id) }}" style="display: flex; align-items: center;">
+                                    <img src="{{ product.image_url | default('https://placehold.co/60x60/eee/ccc?text=Goods', true) }}" alt="{{ product.product_name }}" width="40" height="40" style="margin-right: 10px; border-radius: 4px;">
+                                </a>
+                                <!-- 상품명 Input -->
+                                <input type="text" class="form-control product-name-input" value="{{ product.product_name }}"
+                                {% if product.listing_status in ['경매 예정', '경매 중', '판매 종료'] %}disabled style="background-color:#e9ecef;"{% endif %}>
+                            </td>
+                            <td>
+                                <!-- 카테고리 Select -->
+                                    <select class="form-control category-select"
+                                    {% if product.listing_status in ['경매 예정', '경매 중', '판매 종료'] %}disabled style="background-color:#e9ecef;"{% endif %}>
+                                        {% for cat in ['음반', '피규어', '인형', '아크릴', '응원도구', '포카', '의류', '기타'] %}
+                                        <option value="{{ cat }}" {% if product.category == cat %}selected{% endif %}>{{ cat }}</option>
+                                        {% endfor %}
+                                    </select>
+                            </td>
+                            <td>
+                                <!--가격 Input -->
+                                <input type="number" class="form-control price-input" value="{{ product.price }}" min="0"
+                                {% if product.listing_status in ['경매 예정', '경매 중', '판매 종료'] %}disabled style="background-color:#e9ecef;"{% endif %}>
+                            </td>
+                            <td>
+                                <!--재고 Input -->
+                                <input type="number" class="form-control stock-input" value="{{ product.stock }}" min="0"
+                                {% if product.listing_status in ['경매 예정', '경매 중', '판매 종료'] %}disabled style="background-color:#e9ecef;"{% endif %}>
+                            </td>
+
+                            <td data-field="listing_status" class="editable-cell">
+
+                                <!-- 판매 상태 Select -->
+                                <select class="form-control status-select"
+                                        data-current-value="{{ product.listing_status }}"
+                                        {% if product.listing_status in ['경매 예정', '경매 중', '판매 종료'] %}
+                                            disabled style="background-color: #e9ecef; cursor: not-allowed;"
+                                        {% endif %}>
+
+                                    {% if product.listing_status in ['경매 예정', '경매 중', '판매 종료'] %}
+                                        <!-- 경매 상품이면 현재 상태만 표시 -->
+                                        <option value="{{ product.listing_status }}" selected>{{ product.listing_status }}</option>
+                                    {% else %}
+                                        <!-- 일반 상품이면 현재 상태와 판매 옵션 표시 -->
+                                        {% for stat in ['판매중', '품절'] %}
+                                            <option value="{{ stat }}" {% if product.listing_status == stat %}selected{% endif %}>{{ stat }}</option>
+                                        {% endfor %}
+                                    {% endif %}
+
+                                </select>
+
+                                <!-- 안내 메시지 -->
+                                {% if product.listing_status in ['경매 예정', '경매 중', '판매 종료'] %}
+                                    <small style="display: block; color: #dc3545; margin-top: 5px; font-size: 0.8em;">
+                                        ⚠️ 경매 상품은 상태 변경 불가
+                                    </small>
+                                {% endif %}
+
+                                {% if product.stock == 0 and product.listing_status == '판매중' %}
+                                    <small style="display: block; color: #dc3545; margin-top: 5px; font-size: 0.8em;">
+                                        ⚠️ 판매중인 상품의 재고는 1개 이상이어야 합니다.
+                                    </small>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <!--컨디션 Input (Reseller만 활성화) -->
+                                    <select class="form-control condition-select" {% if product.listing_status in ['경매 예정', '경매 중', '판매 종료'] or user_profile.user.role != 'Reseller' %}disabled{% endif %}>
+                                        <option value="미개봉" {% if product.condition == '미개봉' %}selected{% endif %}>미개봉 (S)</option>
+                                        <option value="최상" {% if product.condition == '최상' %}selected{% endif %}>최상 (A)</option>
+                                        <option value="중" {% if product.condition == '중' %}selected{% endif %}>중 (B)</option>
+                                        <option value="하" {% if product.condition == '하' %}selected{% endif %}>하 (C)</option>
+                                    </select>
+                            </td>
+                            <td>
+                                <!-- 저장 버튼 (onclick 이벤트 연결) -->
+                                <button class="btn primary-btn" onclick="saveProductUpdate({{ product.listing_id }})"
+                                {% if product.listing_status in ['경매 예정', '경매 중', '판매 종료'] %} disabled style="background-color:#999; cursor:not-allowed;"
+                                {% endif %}>저장</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p>등록한 상품이 없습니다. <a href="{{ url_for('show_product_register_page') }}">상품을 등록</a>해보세요.</p>
+            {% endif %}
+
+            <!-- 다은 TODO: style뺴기. -->
+            <style>
+                .form-control {
+                    width: 100%;
+                    padding: 8px;
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                }
+                .order-history-table td {
+                    vertical-align: middle;
+                    min-width: 120px;
+                }
+                .order-history-table td input[type="number"] {
+                    width: 80px;
+                }
+            </style>
 
             {% elif view == 'sales' %}
             <h3>💰 판매 내역(주문 내역)</h3>
@@ -287,7 +374,6 @@
 
 
             <script>
-                // 다은 TODO: 여기서 style부분 따로 style.css파일로 옮기기
                 document.addEventListener('DOMContentLoaded', function() {
                     // 마이페이지 판매자 주문 내역에서만 실행
                     const updateStatusBtns = document.querySelectorAll('.update-status-btn');
@@ -429,7 +515,86 @@
                     });
                 });
 
-                // CSS 스타일 추가 (Dispute 버튼)
+                // 상품 정보 수정 (저장 버튼 클릭 시 호출)
+                async function saveProductUpdate(listingId) {
+                    const row = document.getElementById('row-' + listingId);
+                    const messageArea = document.getElementById('update-message-area');
+
+                    if (!row) {
+                        alert("오류: 해당 상품 행을 찾을 수 없습니다.");
+                        return;
+                    }
+
+                    // 1. 행(row) 내부에서 수정된 값들 가져오기
+                    const data = {
+                        listing_id: listingId,
+                        product_id: row.querySelector('.product-id-input').value,
+                        product_name: row.querySelector('.product-name-input').value,
+                        category: row.querySelector('.category-select').value,
+                        price: row.querySelector('.price-input').value,
+                        stock: row.querySelector('.stock-input').value,
+                        listing_status: row.querySelector('.status-select').value,
+                        condition: row.querySelector('.condition-select').value
+                    };
+
+                    messageArea.textContent = `상품(ID: ${listingId}) 저장 중...`;
+                    messageArea.style.color = 'blue';
+                    messageArea.style.display = 'block';
+
+                    try {
+                        // 2. /api/seller/product/update API 호출
+                        const response = await fetch('/api/seller/product/update', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(data)
+                        });
+
+                        const result = await response.json();
+
+                        if (response.ok) {
+                            messageArea.textContent = `✅ ${result.message}`;
+                            messageArea.style.color = 'green';
+                        } else {
+                            messageArea.textContent = `❌ 저장 실패: ${result.error || result.message}`;
+                            messageArea.style.color = 'red';
+                        }
+
+                    } catch (error) {
+                        messageArea.textContent = `❌ 네트워크 오류: ${error.message}`;
+                        messageArea.style.color = 'red';
+                    }
+
+                    // 3초 뒤 메시지 숨기기
+                    setTimeout(() => {
+                        messageArea.style.display = 'none';
+                    }, 3000);
+                }
+document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll(".status-select").forEach(select => {
+        select.addEventListener("change", function() {
+            const row = select.closest("tr");
+            const stock = row.querySelector(".stock-input").value;
+
+            // 재고=0 이면서 상태=판매중인 경우 방지
+            if (this.value === "판매중" && parseInt(stock) === 0) {
+                alert("재고가 0개인 상품은 '판매중' 상태로 변경할 수 없습니다.");
+                this.value = "품절";   // 자동으로 되돌리기
+            }
+        });
+    });
+});
+
+document.querySelectorAll(".stock-input").forEach(input => {
+    input.addEventListener("input", function () {
+        const row = input.closest("tr");
+        const statusSelect = row.querySelector(".status-select");
+
+        if (parseInt(this.value) === 0 && statusSelect.value === "판매중") {
+            statusSelect.value = "품절";
+        }
+    });
+});
+
 
             </script>
         </div>

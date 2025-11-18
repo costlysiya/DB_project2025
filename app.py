@@ -258,6 +258,7 @@ def get_my_products_list(user_id):
         cur.execute("""
             SELECT 
                 V.listing_id,
+                V.product_id,
                 V.product_name, 
                 V.category,
                 V.image_url,
@@ -1631,6 +1632,105 @@ def api_update_profile():
     finally:
         cur.close()
         conn.close()
+
+# 상품 수정 api (seller)
+@app.route('/api/seller/product/update', methods=['PUT'])
+def update_product_listing():
+    if not session.get('user_id') or session.get('user_role') not in ['PrimarySeller', 'Reseller']:
+        return jsonify({"error": "판매자 권한이 없습니다."}), 403
+
+    data = request.get_json()
+    listing_id = data.get('listing_id')
+    product_name = data.get('product_name')
+    category = data.get('category')
+    price = data.get('price')
+    stock = data.get('stock')
+    status = data.get('listing_status')
+    condition = data.get('condition')  # 2차 판매자만 사용 가능
+
+    # 입력값 검증
+    if not product_name or not product_name.strip():
+        return jsonify({"error": "상품 이름은 필수이며, 공백만으로 채울 수 없습니다."}), 400
+
+    if not all([listing_id, product_name is not None, category, price is not None, stock is not None, status]):
+        return jsonify({"error": "필수 입력 항목이 누락되었습니다."}), 400
+    if stock == 0 and status == "판매중":
+        return jsonify({
+            "success": False,
+            "message": "재고가 0이면 '판매중'으로 변경할 수 없습니다."
+        })
+
+    try:
+        price = int(price)
+        stock = int(stock)
+        if price < 0 or stock < 0:
+            return jsonify({"error": "가격과 재고는 0 이상이어야 합니다."}), 400
+    except ValueError:
+        return jsonify({"error": "가격과 재고는 유효한 숫자여야 합니다."}), 400
+
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({"error": "데이터베이스 연결 오류"}), 500
+
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        user_id = session['user_id']
+
+        # 1. 해당 Listing이 현재 로그인한 판매자의 상품인지 확인 및 product_id 가져오기
+        cur.execute(
+            "SELECT product_id, seller_id FROM Listing WHERE listing_id = %s",
+            (listing_id,)
+        )
+        listing_info = cur.fetchone()
+
+        if listing_info is None:
+            return jsonify({"error": "해당 상품 목록(Listing)을 찾을 수 없습니다."}), 404
+
+        if listing_info['seller_id'] != user_id:
+            return jsonify({"error": "해당 상품에 대한 수정 권한이 없습니다."}), 403
+
+        product_id = listing_info['product_id']
+
+        # 2. Product 테이블 업데이트 (상품명, 카테고리)
+        # Note: 실제 서비스에서는 Product 테이블 업데이트 권한 및 로직이 더 복잡할 수 있음.
+        cur.execute(
+            """
+            UPDATE Product SET
+                name = %s,
+                category = %s
+            WHERE product_id = %s
+            """,
+            (product_name, category, product_id)
+        )
+
+        # 3. Listing 테이블 업데이트 (가격, 재고, 판매 상태, 상태)
+        # condition이 빈 문자열이면 NULL로 처리
+        final_condition = condition if condition else None
+
+        cur.execute(
+            """
+            UPDATE Listing SET
+                price = %s,
+                stock = %s,
+                status = %s,
+                condition = %s
+            WHERE listing_id = %s
+            """,
+            (price, stock, status, final_condition, listing_id)
+        )
+
+        conn.commit()
+        cur.close()
+        return jsonify({"message": f"상품 (Listing ID: {listing_id}) 정보가 성공적으로 업데이트되었습니다."}), 200
+
+    except psycopg2.Error as e:
+        conn.rollback()
+        print(f"DB Update Error: {e}")
+        # ENUM 타입 불일치 등 DB 오류 상세 메시지 반환
+        return jsonify({"error": f"데이터베이스 오류: 입력 값이 잘못되었거나 형식에 맞지 않습니다. (자세한 오류: {e.pgcode})"}), 500
+    finally:
+        if conn:
+            conn.close()
 
 # @app.route('/api/admin_rating', methods=['POST'])
 # def api_admin_rating():
