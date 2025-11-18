@@ -1539,6 +1539,19 @@ def api_update_profile():
         cur.close()
         conn.close()
 
+# @app.route('/api/admin_rating', methods=['POST'])
+# def api_admin_rating():
+#     # TODO: 관리자 -> 판매자 굿즈 등급 부여 api
+#
+# @app.route('/api/admin_disputes', method=['POST'])
+# def api_admin_disputes():
+#     # TODO: 관리자 -> 구매자와 판매자 사이 분쟁 조정 api
+#
+# @app.route('/api/admin_seller_eval', method=['POST'])
+# def api_admin_seller_eval():
+#     #TODO: 관리자 -> 구매자가 올린 판매자 평가 내역 확인 후 승인
+
+
 if __name__ == '__main__':
     # 디버그 모드를 켜고 실행
     app.run(debug=True)

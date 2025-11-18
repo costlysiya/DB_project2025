@@ -106,6 +106,7 @@
                 {% endif %}
 
             {% elif view == 'my_products' %}
+                <!--상품 목록 (Seller)-->
                 <h3>📈 내 상품 목록 (재고 관리)</h3>
                 {% if my_products %}
                     <p>총 {{ my_products | length }}건의 상품이 있습니다.</p>
@@ -149,6 +150,7 @@
 
             {% elif view == 'sales' %}
             <h3>💰 판매 내역(주문 내역)</h3>
+                <!--판매 내역(Seller)-->
                 {% if sales_orders %}
                     <p>총 {{ sales_orders | length }}건의 판매 내역이 있습니다.</p>
                     <table class="order-history-table">
@@ -207,11 +209,14 @@
             <h3>📞 분쟁 처리 현황</h3>
             <p>환불/교환 요청 목록과 처리 상태가 여기에 표시됩니다.</p>
 
+            {% elif view == 'feedback' %}
+            <!-- TODO: 판매자 평가 (Buyer) -->
+            <h3>⭐ 판매자 평가 남기기</h3>
+            <p>거래가 끝난 상품에 대해 판매자 평가하기.</p>
+
             {% elif view == 'profile' %}
-            <!--TODO: 정보 수정 -->
             <h3>👤 회원 정보 수정</h3>
             <p class="subtitle">필요한 항목만 입력하고 수정 버튼을 눌러주세요.</p>
-
             <div class="form-container wide" style="margin: 0 auto; box-shadow: none; border: none;">
                 <form id="profile-update-form">
                     <!-- 공통 정보 -->
@@ -269,7 +274,16 @@
                     <div id="api-message" class="message-box" style="margin-top: 15px;"></div>
                 </form>
             </div>
-                {% endif %}
+            {% elif view == 'admin_rating' %}
+            <h3>💎 굿즈 등급 부여</h3>
+<!--            TODO: 굿즈 등급 부여 기능 구현 (admin)-->
+            {% elif view == 'admin_disputes' %}
+            <h3>📝 분쟁 조정</h3>
+<!--            TODO: 분쟁 조정 기능 구현(admin)-->
+            {% elif view == 'admin_seller_eval' %}
+            <h3>🏆 판매자 평가 관리</h3>
+<!--            TODO: 판매자 평가 관리 기능 구현(admin)-->
+            {% endif %}
 
 
             <script>
