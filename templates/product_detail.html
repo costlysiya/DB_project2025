@@ -64,6 +64,9 @@
                 {% if listing.condition %}
                 <p><strong>상품 상태:</strong> <span>{{ listing.condition }}</span></p>
                 {% endif %}
+                {% if session.user_role == 'PrimarySeller' or session.user_role == 'Administrator' %}
+                    <p><strong>상품 등급:</strong> <span style="font-size: 0.9em; color: #ff69b4;">{{ product.rating }} 등급</span></p>
+                {% endif %}
                 <p><strong>남은 재고:</strong> <span class="stock-value">{{ listing.stock }}개</span></p>
             </div>
 
