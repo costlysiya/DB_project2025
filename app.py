@@ -72,6 +72,8 @@ app.jinja_env.filters['number_format'] = format_number
 
 
 #DB에서 상품을 조회하는 공통 함수
+# app.py 파일 내 get_products_from_db 함수
+
 def get_products_from_db(category=None, search_term=None, auction_only=False):
     conn = get_db_connection()
     if conn is None:
@@ -81,27 +83,60 @@ def get_products_from_db(category=None, search_term=None, auction_only=False):
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        sql_query = "SELECT * FROM V_All_Products"
+        # 1. ✨ SQL SELECT 부분 정의: 실시간 상태 계산 ✨
+        sql_select = """
+                     SELECT 
+                        L.listing_id, L.listing_type, L.price, L.stock, L.condition, L.status,
+                        P.product_id, P.name AS product_name, P.category, P.rating AS product_rating, P.image_url,
+                        U.name AS seller_name, SP.grade AS seller_grade,
+                        A.end_date, A.auction_id, 
+                        
+                        -- 최종 listing_status 계산 (경매 마감 여부 체크)
+                        CASE
+                            WHEN L.listing_type = 'Resale' AND A.auction_id IS NOT NULL 
+                                 AND NOW() AT TIME ZONE 'KST' > A.end_date THEN '판매 종료'
+                            WHEN L.stock = 0 THEN '품절'
+                            ELSE L.status
+                        END AS listing_status
+                    FROM Listing L
+                    JOIN Product P ON L.product_id = P.product_id
+                    JOIN Users U ON L.seller_id = U.user_id
+                    JOIN SellerProfile SP ON U.user_id = SP.user_id
+                    LEFT JOIN Auction A ON L.listing_id = A.listing_id
+                """
+
+        sql_query = sql_select
         conditions = []
         params = []
 
+        # 2. 동적 WHERE 조건 추가 및 조합 (유지)
         if category:
-            conditions.append("category = %s")
+            conditions.append("P.category = %s")
             params.append(category)
         if search_term:
-            # V_All_Products 뷰의 product_name 컬럼에서 검색
-            conditions.append("product_name LIKE %s")
+            conditions.append("P.name LIKE %s")
             params.append(f"%{search_term}%")
+
+        # 경매 전용 필터: L.status가 경매 중/예정이거나 L.status가 '판매 종료'인 경우를 포함합니다.
         if auction_only:
-            conditions.append("listing_status IN ('경매 중', '경매 예정')")
+            # 여기서 '판매 종료'는 경매 마감으로 인해 이미 업데이트된 상태를 포함합니다.
+            conditions.append("L.listing_type = 'Resale' AND L.status IN ('경매 중', '경매 예정', '판매 종료')")
+
         if conditions:
             sql_query += " WHERE " + " AND ".join(conditions)
 
-        sql_query += " ORDER BY listing_id DESC"
+        sql_query += " ORDER BY L.listing_id DESC"
 
         cur.execute(sql_query, tuple(params))
         products_raw = cur.fetchall()
         products = [dict(product) for product in products_raw]
+
+        # ✨ 여기서 각 상품의 listing_status를 최종 계산된 값으로 덮어씁니다. ✨
+        for product in products:
+            if 'listing_status' in product and product['listing_status'] == '판매 종료':
+                # 경매 종료 시 stock이 0이 아닐 경우 품절로 명시적으로 처리
+                if product['stock'] > 0:
+                    product['stock'] = 0
 
         cur.close()
         conn.close()
@@ -112,6 +147,7 @@ def get_products_from_db(category=None, search_term=None, auction_only=False):
         print(f"상품 조회 중 오류 발생: {str(e)}")
 
     return products, len(products)
+
 
 #사용자 정보 가져오는 함수
 def get_user_profile_data(user_id, role):
@@ -261,6 +297,51 @@ def get_my_products_list(user_id):
         print(f"판매자 판매 상품 조회 중 오류 발생: {str(e)}")
         return []
 
+# 장바구니 수량 계산 함수
+def calculate_cart_count(user_id):
+    """ 현재 사용자의 장바구니에 담긴 총 상품 개수를 계산합니다. """
+    if not user_id:
+        return 0
+
+    conn = get_db_connection()
+    if conn is None:
+        return 0
+
+    try:
+        cur = conn.cursor()
+        # ShoppingCart 테이블에서 해당 buyer_id의 quantity 합계를 조회
+        cur.execute(
+            "SELECT COALESCE(SUM(quantity), 0) FROM ShoppingCart WHERE buyer_id = %s",
+            (user_id,)
+        )
+        total_items = cur.fetchone()[0]
+        cur.close()
+        return total_items
+    except Exception as e:
+        print(f"장바구니 수량 계산 오류: {e}")
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+
+# 2. 모든 요청 전에 실행되는 함수 등록 (Flask의 before_request 사용)
+@app.before_request
+def load_user_data_to_session():
+    # 사용자 ID가 세션에 있을 경우에만 실행
+    if 'user_id' in session and session['user_role'] == 'Buyer':
+        # 장바구니 수량을 계산하여 세션에 저장
+        session['cart_count'] = calculate_cart_count(session['user_id'])
+    else:
+        # 비구매자 또는 비로그인 상태는 0으로 초기화
+        session['cart_count'] = 0
+
+    # Jinja2 템플릿에서 session 객체에 직접 접근하도록 설정
+    # (이미 되어 있을 가능성이 높지만, 명시적으로 해줍니다.)
+    from flask import g
+    g.session = session  # 모든 템플릿에서 session을 사용할 수 있도록 보장 (선택적)
+
+
 
 #페이지 렌더링 라우터 (HTML)
 
@@ -302,6 +383,7 @@ def show_product_detail(listing_id):
     seller = None
     resale_images = []
     auction = None  # ✨ 경매 변수 초기화 ✨
+    is_auction_ended = False #경매 완료 확인
 
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -401,6 +483,19 @@ def show_product_detail(listing_id):
                     else:
                         auction['highest_bidder_name'] = None
 
+                    # ⚠️ 현재 시간이 마감 시간을 초과했는지 DB에서 확인합니다.
+                    cur.execute("SELECT NOW() AT TIME ZONE 'KST' > %s", (auction['end_date'],))
+                    is_auction_ended = cur.fetchone()[0]
+
+                    if is_auction_ended and listing['status'] != '판매 종료':
+                        # 4. 경매가 종료되었지만 DB 상태가 '판매 종료'가 아닌 경우
+                        cur.execute("UPDATE Listing SET status = '판매 종료', stock = 0 WHERE listing_id = %s",
+                                    (listing_id,))
+                        conn.commit()  # ✨ DB 변경사항을 영구히 저장합니다. ✨
+                        # 템플릿 렌더링을 위해 상태를 임시로 변경
+                        listing['status'] = '판매 종료'
+
+
         cur.close()
         conn.close()
 
@@ -411,6 +506,7 @@ def show_product_detail(listing_id):
             seller=seller,
             resale_images=resale_images,
             auction=auction,  # ✨ 조회한 auction 데이터를 템플릿에 전달합니다. ✨
+            is_auction_ended=is_auction_ended,
             listing_id=listing_id
         )
 
@@ -1101,6 +1197,7 @@ def add_to_cart():
     listing_id = data.get('listing_id')
     quantity = data.get('quantity')
     buyer_id = session.get('user_id')
+    session['cart_count'] = calculate_cart_count(session['user_id'])
 
     if not all([listing_id, quantity]) or quantity <= 0:
         return jsonify({"error": "상품 ID와 유효한 수량이 필요합니다."}), 400

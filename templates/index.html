@@ -34,7 +34,7 @@
 
         <!-- 상태별로 클래스 분기 -->
         <div class="product-card
-            {% if product.listing_status == '품절' %}sold-out{% endif %}
+            {% if product.listing_status == '품절' or product.listing_status == '판매 종료' %}sold-out{% endif %}
             {% if product.listing_status in ['경매 중', '경매 예정'] %}auction{% endif %}
         ">
 
@@ -55,13 +55,10 @@
             <div class="card-info">
                 <!-- 카테고리 -->
                 <p class="category">{{ product.category }}</p>
-
                 <!-- 상품명 -->
                 <h4 class="product-name"><a href="/product/{{ product.listing_id }}">{{ product.product_name }}</a></h4>
-
                 <!-- 판매자 정보 -->
                 <p class="seller-info">{{ product.seller_name }} ({{ product.seller_grade | default('N/A', true) }})</p>
-
                 <!-- 가격 (경매/일반 판매 분기) -->
                 {% if product.listing_status in ['경매 중', '경매 예정'] %}
                     <p class="product-price auction-price">현재가: {{ "{:,.0f}원".format(product.price) }}</p>
@@ -70,10 +67,12 @@
                 {% endif %}
 
                 <!-- 상태 표시 (품절 > 경매 > 리셀상태 > 등급 순으로 표시) -->
-                {% if product.listing_status == '품절' %}
-                    <span class="status-tag">🚫 품절</span>
+                {% if product.listing_status == '판매 종료' %}
+                <span class="status-tag" style="color: gray;">✅ 경매 완료</span>
                 {% elif product.listing_status == '경매 중' %}
                     <span class="status-tag">🔥 경매 중</span>
+                {% elif product.listing_status == '품절' %}
+                    <span class="status-tag">🚫 품절</span>
                 {% elif product.listing_status == '경매 예정' %}
                     <span class="status-tag">⏳ 경매 예정</span>
                 {% elif product.listing_type == 'Resale' and product.condition %}
