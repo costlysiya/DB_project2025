@@ -48,7 +48,6 @@
         </nav>
 
         <div class="mypage-content">
-<!--다은 TODO: 동적으로 보이는 부분에서 표 style 수정 필요 (너무 붙어잇음)-->
             {% if not view %}
             <h3>매뉴를 선택해 주세요</h3>
             {% elif view == 'orders' %}
@@ -364,6 +363,70 @@
             {% elif view == 'admin_rating' %}
             <h3>💎 굿즈 등급 부여</h3>
 <!--            TODO: 굿즈 등급 부여 기능 구현 (admin)-->
+            <div id="admin-update-message" style="margin-bottom: 15px; padding: 10px; border: 1px solid #ccc; display: none;">
+                여기에 업데이트 메시지가 표시됩니다.
+            </div>
+           {% if products %}
+                <p>총 {{ products | length }}건의 등록된 상품이 있습니다.</p>
+                <table class="order-history-table">
+                    <thead>
+                        <tr>
+                            <th>상품 정보 (이름)</th>
+                            <th>카테고리</th>
+                            <th>상품 설명</th>
+                            <th>등록된 동일 상품 수</th>
+                            <th>등급 (인기도)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for product in products %}
+                            <!--JavaScript가 행(row)을 찾을 수 있도록 ID 부여 -->
+                            <tr id="row-{{ product.product_id }}">
+                                <!-- Product ID를 숨겨둠 (업데이트 시 필요) -->
+                                <input type="hidden" class="product-id-input" value="{{ product.product_id }}">
+                                <td>
+                                    <div style="display: flex; align-items: center;">
+                                        <img src="{{ product.image_url | default('https://placehold.co/60x60/eee/ccc?text=Goods', true) }}"
+                                             alt="{{ product.product_name }}"
+                                             width="40"
+                                             height="40"
+                                             style="margin-right: 10px; border-radius: 4px;">
+                                    </div>
+                                    {{product.name}}
+                                </td>
+                                <td>
+                                    <!-- 카테고리 -->
+                                    {{product.category}}
+                                </td>
+                                <td>
+                                    <!-- 상품 설명 -->
+                                    {{product.description}}
+                                </td>
+                                <td>
+                                    <!-- 등록된 동일 상품 수 -->
+                                    {{product.product_count}}
+                                </td>
+                              <td data-field="listing_status" class="editable-cell">
+                                    {% set current_rating = product.rating | default('null') %}
+                                    <select class="form-control rating-select" data-current-value="{{ current_rating }}">
+                                        <option value="-" {% if current_rating == 'null' %}selected{% endif %}> - </option>
+                                        <option value="S" {% if current_rating == 'S' %}selected{% endif %}> S </option>
+                                        <option value="A" {% if current_rating == 'A' %}selected{% endif %}> A </option>
+                                        <option value="B" {% if current_rating == 'B' %}selected{% endif %}> B </option>
+                                        <option value="C" {% if current_rating == 'C' %}selected{% endif %}> C </option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <!-- 저장 버튼 (onclick 이벤트 연결) -->
+                                    <button class="btn primary-btn" onclick="saveAdminProductRating({{ product.product_id }})">저장</button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p>등록한 상품이 없습니다.</p>
+                {% endif %}
             {% elif view == 'admin_disputes' %}
             <h3>📝 분쟁 조정</h3>
 <!--            TODO: 분쟁 조정 기능 구현(admin)-->
@@ -569,32 +632,72 @@
                         messageArea.style.display = 'none';
                     }, 3000);
                 }
-document.addEventListener("DOMContentLoaded", () => {
-    document.querySelectorAll(".status-select").forEach(select => {
-        select.addEventListener("change", function() {
-            const row = select.closest("tr");
-            const stock = row.querySelector(".stock-input").value;
+                document.addEventListener("DOMContentLoaded", () => {
+                    document.querySelectorAll(".status-select").forEach(select => {
+                        select.addEventListener("change", function() {
+                            const row = select.closest("tr");
+                            const stock = row.querySelector(".stock-input").value;
 
-            // 재고=0 이면서 상태=판매중인 경우 방지
-            if (this.value === "판매중" && parseInt(stock) === 0) {
-                alert("재고가 0개인 상품은 '판매중' 상태로 변경할 수 없습니다.");
-                this.value = "품절";   // 자동으로 되돌리기
-            }
-        });
-    });
-});
+                            // 재고=0 이면서 상태=판매중인 경우 방지
+                            if (this.value === "판매중" && parseInt(stock) === 0) {
+                                alert("재고가 0개인 상품은 '판매중' 상태로 변경할 수 없습니다.");
+                                this.value = "품절";   // 자동으로 되돌리기
+                            }
+                        });
+                    });
+                });
 
-document.querySelectorAll(".stock-input").forEach(input => {
-    input.addEventListener("input", function () {
-        const row = input.closest("tr");
-        const statusSelect = row.querySelector(".status-select");
+                document.querySelectorAll(".stock-input").forEach(input => {
+                    input.addEventListener("input", function () {
+                        const row = input.closest("tr");
+                        const statusSelect = row.querySelector(".status-select");
 
-        if (parseInt(this.value) === 0 && statusSelect.value === "판매중") {
-            statusSelect.value = "품절";
-        }
-    });
-});
+                        if (parseInt(this.value) === 0 && statusSelect.value === "판매중") {
+                            statusSelect.value = "품절";
+                        }
+                    });
+                });
+                   //상품 등급 수정
+                async function saveAdminProductRating(productId) {
+                console.log("DEBUG: saveAdminProductRating 함수 호출됨. Product ID:", productId);
+                    const row = document.getElementById('row-' + productId);
+                    const messageArea = document.getElementById('admin-update-message');
 
+                    if (!row) return;
+
+                    // 등급 값 가져오기
+                    const ratingSelect = row.querySelector('.rating-select');
+                    const rating = ratingSelect.value;
+
+                    messageArea.textContent = `상품(ID: ${productId}) 등급 저장 중...`;
+                    messageArea.style.color = 'blue';
+                    messageArea.style.display = 'block';
+
+                    try {
+                        // (★) 관리자 전용 API 호출
+                        const response = await fetch('/api/admin/product/update', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ product_id: productId, rating: rating })
+                        });
+
+                        const result = await response.json();
+
+                        if (response.ok) {
+                            messageArea.textContent = `✅ ${result.message}`;
+                            messageArea.style.color = 'green';
+                        } else {
+                            messageArea.textContent = `❌ 저장 실패: ${result.error || result.message}`;
+                            messageArea.style.color = 'red';
+                        }
+
+                    } catch (error) {
+                        messageArea.textContent = `❌ 네트워크 오류: ${error.message}`;
+                        messageArea.style.color = 'red';
+                    }
+
+                    setTimeout(() => { messageArea.style.display = 'none'; }, 3000);
+                }
 
             </script>
         </div>

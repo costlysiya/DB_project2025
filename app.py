@@ -4,6 +4,7 @@ from psycopg2 import extras
 import os
 import datetime
 from decimal import Decimal
+from functools import wraps
 
 app = Flask(__name__)
 
@@ -175,6 +176,46 @@ def get_user_profile_data(user_id, role):
         print(f"마이페이지 프로필 조회 중 오류 발생: {str(e)}")
         return None
 
+
+
+#관리자용 상품 목록 조회
+def get_products_for_admin_rating():
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({"error": "DB 연결 실패"}), 500
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        sql_query = """
+            SELECT 
+                P.product_id,
+                P.name,
+                P.category,
+                P.description,
+                P.rating,  -- 현재 등급
+                P.image_url,
+                COUNT(L.listing_id) AS product_count -- 등록된 동일 상품 수 집계
+            FROM 
+                Product P
+            LEFT JOIN -- 등록된 Listing이 없더라도 Product 정보는 보여주기 위해 LEFT JOIN
+                Listing L ON P.product_id = L.product_id
+            GROUP BY
+                P.product_id, P.name, P.category, P.description, P.rating, P.image_url
+            ORDER BY 
+                P.product_id DESC
+        """
+        cur.execute(sql_query)
+        products = [dict(row) for row in cur.fetchall()]
+
+        cur.close()
+        conn.close()
+
+        return products
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        return jsonify({"error": f"상품 목록 조회 오류: {str(e)}"}), 500
 
 # 주문 목록 조회 함수 (구매자 전용)
 def get_orders_for_buyer(user_id):
@@ -493,7 +534,7 @@ def show_product_detail(listing_id):
                         # 4. 경매가 종료되었지만 DB 상태가 '판매 종료'가 아닌 경우
                         cur.execute("UPDATE Listing SET status = '판매 종료', stock = 0 WHERE listing_id = %s",
                                     (listing_id,))
-                        conn.commit()  # ✨ DB 변경사항을 영구히 저장합니다. ✨
+                        conn.commit()
                         # 템플릿 렌더링을 위해 상태를 임시로 변경
                         listing['status'] = '판매 종료'
 
@@ -695,7 +736,8 @@ def show_mypage():
         "view": current_view,
         "orders": [],  # 기본값
         "sales_orders": [],  # 기본값
-        "my_products": []  # 기본값
+        "my_products": [],  # 기본값
+        "products" : [] #product테이블의 모든 상품
     }
     if current_view == 'orders' and user_role == 'Buyer':
         template_data["orders"] = get_orders_for_buyer(user_id)
@@ -703,6 +745,8 @@ def show_mypage():
         template_data["sales_orders"] = get_sales_for_seller(user_id)
     elif current_view == 'my_products' and user_role in ['PrimarySeller', 'Reseller']:
         template_data["my_products"] = get_my_products_list(user_id)
+    elif current_view == 'admin_rating' and user_role == 'Administrator':
+        template_data["products"] = get_products_for_admin_rating()
         # 5. 템플릿 렌더링
     return render_template('mypage.html', **template_data)
 
@@ -1034,10 +1078,9 @@ def auction_bid():
         # 1. 현재 경매 상태 및 가격 확인 (FOR UPDATE로 레코드 잠금)
         cur.execute(
             """
-            SELECT A.current_price, A.start_date, A.end_date, L.status, L.seller_id
-            FROM Auction A
-                     JOIN Listing L ON A.listing_id = L.listing_id
-            WHERE A.auction_id = %s
+            SELECT current_price, start_date, end_date, calculated_auction_status, seller_id
+            FROM v_auction_status
+            WHERE auction_id = %s
                 FOR UPDATE
             """,
             (auction_id,)
@@ -1081,11 +1124,11 @@ def auction_bid():
             conn.rollback()
             return jsonify({"error": f"입찰가는 현재 최고가({auction_info['current_price']})보다 높아야 합니다."}), 400
 
-        # 5. 입찰 기록 (AuctionBid)
-        cur.execute(
-            "INSERT INTO AuctionBid (auction_id, buyer_id, bid_price, bid_time) VALUES (%s, %s, %s, NOW())",
-            (auction_id, buyer_id, bid_price)
-        )
+        # # 5. 입찰 기록 (AuctionBid)
+        # cur.execute(
+        #     "INSERT INTO AuctionBid (auction_id, buyer_id, bid_price, bid_time) VALUES (%s, %s, %s, NOW())",
+        #     (auction_id, buyer_id, bid_price)
+        # )
 
         # 6. 경매 정보 업데이트 (Auction)
         cur.execute(
@@ -1105,6 +1148,7 @@ def auction_bid():
 
 
 #  경매 종료 및 자동 주문 기능
+# TODO: 경매 종료 후 자동으로 orderb테이블에 추가되는거 어디에 연결?
 @app.route('/api/auction/finalize', methods=['POST'])
 def finalize_auction():
     data = request.json
@@ -1124,10 +1168,9 @@ def finalize_auction():
         # 1. 경매 정보 및 최고 입찰자 확인 (FOR UPDATE로 레코드 잠금)
         cur.execute(
             """
-            SELECT A.listing_id, A.current_price, A.current_highest_bidder_id, A.end_date, L.status
-            FROM Auction A
-                     JOIN Listing L ON A.listing_id = L.listing_id
-            WHERE A.auction_id = %s
+            SELECT *
+            FROM v_auction_status 
+            WHERE auction_id = %s
                 FOR UPDATE
             """,
             (auction_id,)
@@ -1752,10 +1795,54 @@ def update_product_listing():
         if conn:
             conn.close()
 
-# @app.route('/api/admin_rating', methods=['POST'])
-# def api_admin_rating():
-#     # TODO: 관리자 -> 판매자 굿즈 등급 부여 api
-#
+
+# ---  관리자용 상품 등급 수정 API ---
+@app.route('/api/admin/product/update', methods=['PUT'])
+def update_product_by_admin():
+    # 1. 로그인 및 관리자 권한 확인
+    if 'user_id' not in session or session.get('user_role') != 'Administrator':
+        return jsonify({"error": "관리자 권한이 없습니다."}), 403
+
+    data = request.json
+
+    # 2. 데이터 추출
+    product_id = data.get('product_id')
+    rating = data.get('rating')
+
+    if not product_id:
+        return jsonify({"error": "상품 ID가 누락되었습니다."}), 400
+
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({"error": "데이터베이스 연결 실패"}), 500
+
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        # 3. Product 테이블 업데이트 (등급)
+        # rating이 '-'이면 NULL로 처리하거나, DB 스키마에 따라 빈 문자열로 처리
+        if rating == '-':
+            rating_val = None
+        else:
+            rating_val = rating
+
+        cur.execute(
+            "UPDATE Product SET rating = %s WHERE product_id = %s",
+            (rating_val, product_id)
+        )
+
+        conn.commit()
+        return jsonify({"message": f"상품(ID: {product_id}) 등급이 '{rating}'(으)로 수정되었습니다."}), 200
+
+    except Exception as e:
+        conn.rollback()
+        print(f"관리자 상품 수정 트랜잭션 실패: {str(e)}")
+        return jsonify({"error": f"DB 오류로 수정에 실패했습니다: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
 # @app.route('/api/admin_disputes', method=['POST'])
 # def api_admin_disputes():
 #     # TODO: 관리자 -> 구매자와 판매자 사이 분쟁 조정 api
