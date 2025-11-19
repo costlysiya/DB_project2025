@@ -854,3 +854,177 @@ hr {
     color: #2c3e50;
     font-weight: 500;
 }
+
+.form-container {
+    max-width: 600px;
+    margin: 20px auto;
+    padding: 30px;
+    background-color: var(--card-background);
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+}
+.form-container.wide {
+    max-width: 800px;
+}
+h2 {
+    text-align: center;
+    margin-top: 0;
+    margin-bottom: 10px;
+}
+.subtitle {
+    text-align: center;
+    color: var(--text-color-light);
+    margin-top: 0;
+    margin-bottom: 30px;
+}
+.form-group-section {
+    margin-bottom: 25px;
+}
+.form-group-section h3 {
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 8px;
+    margin-bottom: 20px;
+    color: var(--primary-color);
+}
+.form-group {
+    margin-bottom: 20px;
+}
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+.form-group .required {
+    color: var(--resale-color);
+    font-weight: bold;
+}
+.form-group input[type="text"],
+.form-group input[type="password"],
+.form-group input[type="email"],
+.form-group input[type="url"],
+.form-group input[type="number"],
+.form-group input[type="datetime-local"],
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-sizing: border-box; /* 패딩 포함 크기 계산 */
+    font-size: 1rem;
+}
+.form-group textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+.form-group .note {
+    font-size: 0.9rem;
+    color: var(--text-color-light);
+    margin-top: 8px;
+}
+.form-group.auction-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background-color: #fcf8e3;
+    border: 1px solid #faebcc;
+    padding: 15px;
+    border-radius: 6px;
+}
+.form-group.auction-toggle label {
+    margin-bottom: 0;
+    font-weight: bold;
+}
+.form-group.auction-toggle input[type="checkbox"] {
+    width: auto;
+    height: 1.2em;
+    width: 1.2em;
+}
+
+/* 유틸리티 클래스 */
+.hidden {
+    display: none;
+}
+.btn {
+    display: inline-block;
+    padding: 12px 20px;
+    font-size: 1rem;
+    font-weight: bold;
+    text-align: center;
+    text-decoration: none;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s;
+}
+.btn.full-width {
+    width: 100%;
+}
+.btn.submit-btn {
+    background-color: var(--primary-color);
+    color: white;
+    font-size: 1.1rem;
+    padding: 15px;
+}
+.btn.submit-btn:hover {
+    background-color: var(--button-primary-hover);
+}
+
+.api-message {
+    text-align: center;
+    font-weight: bold;
+    padding: 10px;
+    border-radius: 6px;
+}
+/* --- 관리자 분쟁 조정 테이블 스타일 --- */
+.dispute-container {
+    padding: 20px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.dispute-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+
+.dispute-table th, .dispute-table td {
+    padding: 12px;
+    border: 1px solid #eee;
+    text-align: center;
+    font-size: 0.9em;
+}
+
+.dispute-table th {
+    background-color: #f0f4f7;
+    color: #333;
+}
+
+/* 분쟁 상태 뱃지 */
+.dispute-status, .issue-type {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+    font-size: 0.8em;
+}
+
+.status-처리전 { background-color: #ffe0b2; color: #ff9800; }
+.status-처리중 { background-color: #bbdefb; color: #2196f3; }
+.status-처리완료 { background-color: #c8e6c9; color: #4caf50; }
+
+.issue-환불 { background-color: #fbe5e5; color: #e74c3c; }
+.issue-교환 { background-color: #e5f5fbe; color: #3498db; }
+
+/* 액션 버튼 */
+.admin-action-btn {
+    padding: 6px 10px;
+    font-size: 0.8em;
+    cursor: pointer;
+    color: white !important;
+}
+
+.btn-processing { background-color: #f1c40f; }
+.btn-complete { background-color: #2ecc71; }

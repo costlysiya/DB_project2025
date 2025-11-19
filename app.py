@@ -110,17 +110,29 @@ def get_products_from_db(category=None, search_term=None, auction_only=False, so
         if conditions:
             sql_query += " WHERE " + " AND ".join(conditions)
 
+        status_order_clause = """
+            CASE listing_status
+                WHEN '판매 종료' THEN 2   -- 경매 완료 (가장 낮은 우선순위)
+                WHEN '품절' THEN 1          -- 품절 (두 번째로 낮은 우선순위)
+                ELSE 0                    -- 그 외 (판매 중, 경매 중/예정)
+            END ASC,
+        """
 
         #정렬 로직 추가: sort_by 값에 따라 ORDER BY 절을 동적으로 변경
         if sort_by == 'low_price':
-            order_clause = " ORDER BY price ASC"
+            main_order_clause = " price ASC"
         elif sort_by == 'high_price':
-            order_clause = " ORDER BY price DESC"
+            main_order_clause = " price DESC"
         elif sort_by == 'rating':
-            # 굿즈 등급(product_rating) 순으로 정렬 (S > A > B...)
-            order_clause = " ORDER BY product_rating DESC NULLS LAST, listing_id DESC"
-        else :
-            order_clause = " ORDER BY listing_id DESC"  # 기본: 최신 등록순
+            # 등급은 S, A, B 순이므로 DESC, NULLS LAST는 등급이 없는 상품을 뒤로 보냄
+            main_order_clause = " product_rating DESC NULLS LAST, listing_id DESC"
+        else:
+            # 기본 정렬: 최신 등록순
+            main_order_clause = " listing_id DESC"
+
+            # 3. 최종 ORDER BY 절 조합: 상태 우선순위 + 메인 기준 적용
+        order_clause = " ORDER BY " + status_order_clause + main_order_clause
+
         sql_query += order_clause
 
         cur.execute(sql_query, tuple(params))
@@ -376,6 +388,91 @@ def load_user_data_to_session():
     g.session = session  # 모든 템플릿에서 session을 사용할 수 있도록 보장 (선택적)
 
 
+#관리자 분쟁 조정 함수
+def get_disputes():
+    """ 모든 분쟁 목록을 조회합니다 (관리자 전용). """
+    conn = get_db_connection()
+    if conn is None:
+        return []
+
+    disputes = []
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        # Dispute 테이블과 Orderb, Users 테이블을 조인하여 필요한 정보를 가져옵니다.
+        cur.execute("""
+                    SELECT D.dispute_id,
+                           D.issue_type,
+                           D.status, D.reason,
+                           D.order_id,
+                           O.total_price,
+                           O.listing_id,
+                           O.status    AS order_status,
+                           BUYER.name  AS buyer_name,
+                           SELLER.name AS seller_name,
+                           P.name      AS product_name
+                    FROM Dispute D
+                             JOIN Orderb O ON D.order_id = O.order_id
+                             JOIN Listing L ON O.listing_id = L.listing_id
+                             JOIN Product P ON L.product_id = P.product_id
+                             JOIN Users BUYER ON O.buyer_id = BUYER.user_id
+                             JOIN Users SELLER ON L.seller_id = SELLER.user_id
+                    ORDER BY D.dispute_id ASC;
+                    """)
+        disputes = [dict(row) for row in cur.fetchall()]
+
+        cur.close()
+        return disputes
+
+    except Exception as e:
+        print(f"분쟁 목록 조회 오류: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_disputes_for_buyer(buyer_id):
+    """ 특정 구매자가 요청한 분쟁 목록을 조회합니다. """
+    conn = get_db_connection()
+    if conn is None:
+        return []
+
+    disputes = []
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        # Dispute 테이블과 Orderb, Listing, Product 테이블을 조인하여 분쟁 요청 내역을 가져옵니다.
+        cur.execute("""
+                    SELECT D.dispute_id,
+                           D.issue_type,
+                           D.status AS dispute_status,
+                           D.reason,
+                           O.order_id,
+                           O.total_price,
+                           O.status AS order_status,
+                           P.name   AS product_name,
+                           U.name   AS seller_name
+                    FROM Dispute D
+                             JOIN Orderb O ON D.order_id = O.order_id
+                             JOIN Listing L ON O.listing_id = L.listing_id
+                             JOIN Product P ON L.product_id = P.product_id
+                             JOIN Users U ON L.seller_id = U.user_id
+                    WHERE O.buyer_id = %s
+                    ORDER BY D.dispute_id DESC;
+                    """, (buyer_id,))
+        disputes = [dict(row) for row in cur.fetchall()]
+
+        cur.close()
+        return disputes
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        print(f"구매자 분쟁 현황 조회 오류: {e}")
+        return []
+
+
 # 페이지 렌더링 라우터 (HTML)
 
 # --- 메인 페이지 (전체 상품) ---
@@ -531,15 +628,57 @@ def show_product_detail(listing_id):
                     is_auction_ended = cur.fetchone()[0]
 
                     if is_auction_ended and listing['status'] != '판매 종료':
-                        # 4. 경매가 종료되었지만 DB 상태가 '판매 종료'가 아닌 경우
-                        cur.execute("UPDATE Listing SET status = '판매 종료', stock = 0 WHERE listing_id = %s",
-                                    (listing_id,))
-                        conn.commit()
-                        # 템플릿 렌더링을 위해 상태를 임시로 변경
-                        listing['status'] = '판매 종료'
+                        auction_id_for_finalize = auction['auction_id']
+                        cur.close()
+                        conn.close()
 
-        cur.close()
-        conn.close()
+                        # DB 연결을 다시 엽니다. (새로운 트랜잭션 필요)
+                        conn_finalize = get_db_connection()
+                        if conn_finalize:
+                            cur_finalize = conn_finalize.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                            conn_finalize.autocommit = False
+
+                            try:
+                                # 1. 최종 경매 정보 확인
+                                cur_finalize.execute(
+                                    "SELECT A.listing_id, A.current_price, A.current_highest_bidder_id, L.status FROM Auction A JOIN Listing L ON A.listing_id = L.listing_id WHERE A.auction_id = %s FOR UPDATE",
+                                    (auction_id_for_finalize,))
+                                final_info = cur_finalize.fetchone()
+
+                                if final_info and final_info['status'] != '판매 종료':
+                                    winner_id = final_info['current_highest_bidder_id']
+                                    final_price = final_info['current_price']
+
+                                    # 2. Listing 상태 '판매 종료'로 변경
+                                    cur_finalize.execute(
+                                        "UPDATE Listing SET status = '판매 종료', stock = 0 WHERE listing_id = %s",
+                                        (listing_id,))
+
+                                    # 3. 최고 입찰자에게 주문 생성 (Orderb 삽입)
+                                    if winner_id:
+                                        cur_finalize.execute(
+                                            """
+                                            INSERT INTO Orderb (buyer_id, listing_id, quantity, total_price, status)
+                                            VALUES (%s, %s, 1, %s, '상품 준비중')
+                                            """,
+                                            (winner_id, listing_id, final_price)
+                                        )
+
+                                    conn_finalize.commit()
+
+                                    # 템플릿 렌더링을 위해 listing 상태를 업데이트
+                                    listing['status'] = '판매 종료'
+                                    listing['stock'] = 0
+
+                            except Exception as e:
+                                print(f"경매 최종 처리 중 오류: {e}")
+                                conn_finalize.rollback()
+                            finally:
+                                cur_finalize.close()
+                                conn_finalize.close()
+
+                            # 원래 함수로 돌아와 최종 렌더링을 진행합니다.
+                            # is_auction_ended는 여전히 True입니다.
 
         return render_template(
             'product_detail.html',
@@ -737,6 +876,8 @@ def show_mypage():
         "orders": [],  # 기본값
         "sales_orders": [],  # 기본값
         "my_products": [],  # 기본값
+        "disputes": [],  # 기본값
+        "admin_disputes": [],
         "products" : [] #product테이블의 모든 상품
     }
     if current_view == 'orders' and user_role == 'Buyer':
@@ -745,6 +886,10 @@ def show_mypage():
         template_data["sales_orders"] = get_sales_for_seller(user_id)
     elif current_view == 'my_products' and user_role in ['PrimarySeller', 'Reseller']:
         template_data["my_products"] = get_my_products_list(user_id)
+    elif current_view == 'disputes' and user_role == 'Buyer':
+        template_data["disputes"] = get_disputes_for_buyer(user_id)
+    elif current_view == 'admin_disputes' and user_role == 'Administrator': # ✨ 관리자 역할일 때만 모든 분쟁 목록을 조회합니다. ✨
+        template_data["admin_disputes"] = get_disputes()
     elif current_view == 'admin_rating' and user_role == 'Administrator':
         template_data["products"] = get_products_for_admin_rating()
         # 5. 템플릿 렌더링
@@ -1843,6 +1988,173 @@ def update_product_by_admin():
         cur.close()
         conn.close()
 
+#관리자 분쟁 조정 페이지
+@app.route('/admin/disputes', methods=['GET'])
+def show_admin_disputes():
+    # ⚠️ 관리자 권한 확인 (세션 user_role 확인)
+    if session.get('user_role') != 'Administrator':
+        return "관리자만 접근 가능합니다.", 403
+
+    disputes = get_disputes()
+
+    return render_template(
+        'admin_disputes.html',
+        disputes=disputes
+    )
+
+# 관리자에게 분쟁 요청(구매자)
+@app.route('/api/dispute/create', methods=['POST'])
+def create_dispute():
+    # 1. 권한 확인 (구매자만 가능)
+    if 'user_id' not in session or session.get('user_role') != 'Buyer':
+        return jsonify({"error": "구매자로 로그인해야 분쟁을 요청할 수 있습니다."}), 401
+
+    data = request.json
+    order_id = data.get('order_id')
+    issue_type = data.get('issue_type')  # '환불' 또는 '교환'
+    reason = data.get('reason')  # 사유 (추가 입력값)
+
+    if not all([order_id, issue_type, reason]):
+        return jsonify({"error": "주문 ID, 유형, 사유가 모두 필요합니다."}), 400
+
+    if issue_type not in ['환불', '교환']:
+        return jsonify({"error": "유효하지 않은 분쟁 유형입니다."}), 400
+
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({"error": "데이터베이스 연결 실패"}), 500
+
+    conn.autocommit = False
+    cur = conn.cursor()
+    buyer_id = session.get('user_id')
+    admin_id = 1  # 임시 관리자 ID (관리자 테이블에 1번으로 등록되어 있다고 가정)
+
+    try:
+        # 1. 주문의 소유권 및 상태 확인 (DB 트랜잭션 보호)
+        cur.execute(
+            "SELECT status FROM Orderb WHERE order_id = %s AND buyer_id = %s",
+            (order_id, buyer_id)
+        )
+        order_info = cur.fetchone()
+
+        if not order_info:
+            conn.rollback()
+            return jsonify({"error": "주문 정보를 찾을 수 없거나 소유권이 없습니다."}), 404
+
+        if order_info[0] != '배송 완료':
+            conn.rollback()
+            return jsonify({"error": f"분쟁 요청은 '배송 완료' 상태에서만 가능합니다. (현재 상태: {order_info[0]})"}), 403
+
+        # 2. 이미 해당 주문에 대한 분쟁이 있는지 확인 (선택적)
+        cur.execute("SELECT 1 FROM Dispute WHERE order_id = %s", (order_id,))
+        if cur.fetchone():
+            conn.rollback()
+            return jsonify({"message": "이미 해당 주문에 대한 분쟁 요청이 접수되었습니다."}), 409
+
+        # 3. Dispute 테이블에 요청 삽입
+        cur.execute(
+            """
+            INSERT INTO Dispute (order_id, admin_id, issue_type, status, reason)
+            VALUES (%s, %s, %s, '처리 전', %s) RETURNING dispute_id
+            """,
+            (order_id, admin_id, issue_type, reason)
+        )
+        dispute_id = cur.fetchone()[0]
+
+        # 4. 트랜잭션 커밋
+        conn.commit()
+        return jsonify({"message": f"분쟁 요청(ID: {dispute_id})이 관리자에게 접수되었습니다.", "dispute_id": dispute_id}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"분쟁 요청 트랜잭션 실패: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+@app.route('/api/dispute/update_status', methods=['POST'])
+def update_dispute_status():
+    # 1. 권한 확인
+    if session.get('user_role') != 'Administrator':
+        return jsonify({"error": "관리자만 접근 가능합니다."}), 403
+
+    data = request.json
+    dispute_id = data.get('dispute_id')
+    new_dispute_status = data.get('new_status')  # '처리 중', '처리 완료'
+    resolution = data.get('resolution')  # '환불', '교환', '거절' (처리 완료 시)
+
+    if not all([dispute_id, new_dispute_status]):
+        return jsonify({"error": "분쟁 ID와 새로운 상태가 필요합니다."}), 400
+
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({"error": "데이터베이스 연결 실패"}), 500
+
+    conn.autocommit = False
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    try:
+        # 1. 분쟁 정보 및 현재 상태 확인 (FOR UPDATE)
+        cur.execute("SELECT order_id, status, issue_type FROM Dispute WHERE dispute_id = %s FOR UPDATE", (dispute_id,))
+        dispute_info = cur.fetchone()
+
+        if not dispute_info:
+            conn.rollback()
+            return jsonify({"error": "존재하지 않는 분쟁 ID입니다."}), 404
+
+        order_id = dispute_info['order_id']
+
+        # 2. Dispute 테이블 상태 업데이트
+        cur.execute(
+            "UPDATE Dispute SET status = %s WHERE dispute_id = %s",
+            (new_dispute_status, dispute_id)
+        )
+
+        message = f"분쟁 #{dispute_id} 상태가 '{new_dispute_status}'로 업데이트되었습니다."
+
+        # 3. ✨ 처리 완료 (승인/거절) 로직 ✨
+        if new_dispute_status == '처리 완료':
+
+            if resolution == '거절':
+                message = f"분쟁 #{dispute_id} 요청이 관리자에 의해 거절되어 처리가 완료되었습니다."
+
+            elif resolution in ['환불', '교환']:
+                # 3-1. 승인: Orderb 테이블 상태를 연쇄 업데이트 (Transaction)
+
+                # Dispute의 Issue_type과 Resolution이 일치하는지 확인 (선택적)
+                # if dispute_info['issue_type'] != resolution: ...
+
+                cur.execute(
+                    "UPDATE Orderb SET status = %s WHERE order_id = %s",
+                    (resolution, order_id)  # Orderb 상태를 '환불' 또는 '교환'으로 변경
+                )
+                message = f"분쟁 #{dispute_id} 승인: 주문 #{order_id}가 '{resolution}' 상태로 변경되었습니다."
+
+                # TODO: [필수] 환불 시 Listing 재고 복원 또는 재고/재입고 처리 로직 추가 필요
+
+            elif resolution == '거절':
+                message = f"분쟁 #{dispute_id} 처리 완료: 관리자가 요청을 거절했습니다."
+            else:
+                conn.rollback()
+                return jsonify({"error": "처리 완료 시 유효한 Resolution('환불', '교환', '거절')이 필요합니다."}), 400
+
+        # 4. 트랜잭션 커밋
+        conn.commit()
+        return jsonify({"message": message, "new_status": new_dispute_status}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"분쟁 처리 트랜잭션 실패: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+# @app.route('/api/admin_rating', methods=['POST'])
+# def api_admin_rating():
+#     # TODO: 관리자 -> 판매자 굿즈 등급 부여 api
+#
 # @app.route('/api/admin_disputes', method=['POST'])
 # def api_admin_disputes():
 #     # TODO: 관리자 -> 구매자와 판매자 사이 분쟁 조정 api
