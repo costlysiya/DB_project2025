@@ -107,7 +107,7 @@
             <!--상품 목록 (Seller)-->
             <h3>📈 내 상품 목록 (재고 관리)</h3>
 
-            <!-- AJAX 메시지 표시 영역 -->
+            <!-- (★) AJAX 메시지 표시 영역 -->
             <div id="update-message-area" style="margin: 15px 0; padding: 10px; border-radius: 6px; display: none; font-weight: bold;"></div>
 
             {% if my_products %}
@@ -571,7 +571,6 @@
             {% else %}
                 <p>현재 접수된 분쟁 요청이 없습니다.</p>
             {% endif %}
-
             {% elif view == 'admin_seller_eval' %}
             <h3>🏆 판매자 평가 관리</h3>
 <!--            TODO: 판매자 평가 관리 기능 구현(admin)-->
