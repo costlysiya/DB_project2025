@@ -1028,3 +1028,14 @@ h2 {
 
 .btn-processing { background-color: #f1c40f; }
 .btn-complete { background-color: #2ecc71; }
+
+.btn-success {
+    background-color: #2ecc71; /* 성공/초록색 */
+    border-color: #27ae60;
+    color: white !important;
+    padding: 6px 12px;
+}
+.status-success {
+    font-weight: bold;
+    color: #2ecc71;
+}

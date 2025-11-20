@@ -973,7 +973,6 @@ def show_mypage():
         "finished_orders": [], #거래 종료인 상품 조회(구매자가 feedback남기는 용도)
         "sales_orders": [],  # 기본값
         "my_products": [],  # 기본값
-        "products": [], #product테이블의 모든 상품(관리자가 보는 용도)
         "disputes": [],  # 기본값
         "admin_disputes": [],
         "all_feedback": []
@@ -990,10 +989,6 @@ def show_mypage():
         template_data["admin_disputes"] = get_disputes()
     elif current_view == 'admin_rating' and user_role == 'Administrator':
         template_data["products"] = get_products_for_admin_rating()
-    elif current_view == 'disputes' and user_role == 'Buyer':
-        template_data["disputes"] = get_disputes_for_buyer(user_id)
-    elif current_view == 'admin_disputes' and user_role == 'Administrator':
-        template_data["admin_disputes"] = get_disputes()
     elif current_view == 'feedback' and user_role == 'Buyer':
         template_data["finished_orders"] = get_orders_for_buyer(user_id, 'finished_order')
     elif current_view == 'admin_seller_eval' and user_role == 'Administrator':
@@ -2209,6 +2204,71 @@ def update_dispute_status():
     except Exception as e:
         conn.rollback()
         return jsonify({"error": f"분쟁 처리 트랜잭션 실패: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+#구매 확정 라우터
+@app.route('/api/order/confirm_purchase', methods=['POST'])
+def confirm_purchase():
+    # 1. 권한 확인
+    if session.get('user_role') != 'Buyer':
+        return jsonify({"error": "구매자만 구매 확정을 할 수 있습니다."}), 403
+
+    data = request.json
+    order_id = data.get('order_id')
+    buyer_id = session.get('user_id')
+
+    if not order_id:
+        return jsonify({"error": "주문 ID가 필요합니다."}), 400
+
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({"error": "데이터베이스 연결 실패"}), 500
+
+    conn.autocommit = False
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    try:
+        # 2. 주문 소유권 및 현재 상태 확인 (배송 완료 상태에서만 가능)
+        cur.execute(
+            """
+            SELECT status FROM Orderb 
+            WHERE order_id = %s AND buyer_id = %s FOR UPDATE
+            """,
+            (order_id, buyer_id)
+        )
+        order_info = cur.fetchone()
+
+        if not order_info:
+            conn.rollback()
+            return jsonify({"error": "주문 ID를 찾을 수 없거나 소유권이 없습니다."}), 404
+
+        current_status = order_info['status']
+
+        # ✨ NULL 값 또는 유효하지 않은 상태 명시적 처리 ✨
+        if current_status is None:
+            conn.rollback()
+            return jsonify({"error": "DB 오류: 주문 상태가 NULL로 저장되어 있습니다."}), 500
+
+            # 2. '배송 완료' 상태 비교 (NULL 처리가 되었으므로 안전함)
+        if current_status != '배송 완료':
+            conn.rollback()
+            return jsonify({"error": f"주문 상태 '{current_status}'는 확정할 수 없습니다. '배송 완료' 상태에서만 가능합니다."}), 400
+        # 3. Orderb 상태를 '구매 확정'으로 변경
+        # (⚠️ DB의 order_status ENUM에 '구매 확정'이 추가되었다고 가정합니다.)
+        cur.execute(
+            "UPDATE Orderb SET status = '구매 확정' WHERE order_id = %s",
+            (order_id,)
+        )
+
+        conn.commit()
+        return jsonify({"message": f"주문 #{order_id}가 구매 확정되었습니다. 감사합니다.", "new_status": "구매 확정"}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"구매 확정 처리 실패: {str(e)}"}), 500
     finally:
         cur.close()
         conn.close()
