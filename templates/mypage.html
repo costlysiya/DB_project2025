@@ -35,7 +35,6 @@
                 {% if user_profile.user.role in ['PrimarySeller', 'Reseller'] %}
                 <li><a href="{{ url_for('show_mypage', view='my_products') }}" class="{% if view == 'my_products' %}active{% endif %}">📈 상품 등록 내역</a></li>
                 <li><a href="{{ url_for('show_mypage', view='sales') }}" class="{% if view == 'sales' %}active{% endif %}">💰 판매 내역 확인</a></li>
-                <li><a href="{{ url_for('show_mypage', view='evaluation') }}" class="{% if view == 'evaluation' %}active{% endif %}">⭐ 받은 평가 보기</a></li>
                 {% endif %}
 
                 {% if user_profile.user.role == 'Administrator' %}
@@ -285,20 +284,63 @@
                     <p>최근 판매 내역이 없습니다.</p>
                 {% endif %}
 
-            {% elif view == 'evaluation' %}
-            <!-- TODO: 받은 평가 보기 (Seller) -->
-            <h3>⭐ 받은 평가 보기</h3>
-            <p>구매자들이 남긴 판매자 평가 목록이 여기에 표시됩니다.</p>
-
             {% elif view == 'disputes' %}
             <!-- TODO: 분쟁 처리 현황 (Buyer) -->
             <h3>📞 분쟁 처리 현황</h3>
             <p>환불/교환 요청 목록과 처리 상태가 여기에 표시됩니다.</p>
 
             {% elif view == 'feedback' %}
-            <!-- TODO: 판매자 평가 (Buyer) -->
+            <!-- 내가 할 것 TODO: 판매자 평가 (Buyer) -->
             <h3>⭐ 판매자 평가 남기기</h3>
             <p>거래가 끝난 상품에 대해 판매자 평가하기.</p>
+                            {% if sales_orders %}
+                    <p>총 {{ sales_orders | length }}건의 판매 내역이 있습니다.</p>
+                    <table class="order-history-table">
+                        <thead>
+                            <tr>
+                                <th>상품 정보</th>
+                                <th>구매자</th>
+                                <th>주소</th>
+                                <th>수량</th>
+                                <th>총 금액</th>
+                                <th>주문 일시</th>
+                                <th>처리 상태</th>
+                                <th>액션</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for order in sales_orders %}
+                            <tr data-order-id="{{ order.order_id }}">
+                                <td>
+                                    <a href="{{ url_for('show_product_detail', listing_id=order.listing_id) }}">
+                                        <img src="{{ order.image_url | default('https://placehold.co/60x60/eee/ccc?text=Goods', true) }}" alt="{{ order.product_name }}" width="40" height="40" style="margin-right: 10px; border-radius: 4px; vertical-align: middle;">
+                                        {{ order.product_name }}
+                                    </a>
+                                </td>
+                                <td>{{ order.buyer_name }} ({{ order.buyer_uid }})</td>
+                                <td>{{ order.buyer_address }}</td>
+                                <td>{{ order.quantity }}</td>
+                                <td>{{ "{:,.0f}원".format(order.total_price) }}</td>
+                                <td>{{ order.order_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td class="order-status-{{ order.order_id }}">{{ order.status }}</td>
+                                <td>
+                                    <!--  주문 상태 변경 버튼 (클릭 이벤트 연결) -->
+                                    <button class="btn update-status-btn"
+                                            data-order-id="{{ order.order_id }}"
+                                            data-current-status="{{ order.status }}"
+                                            {% if order.status in ['배송 완료', '환불', '교환'] %} disabled {% endif %}
+                                            style="{% if order.status == '배송 중' %} background-color: orange; {% elif order.status == '상품 준비중' %} background-color: #007bff; {% else %} background-color: #6c757d; {% endif %} color: white; border: none; padding: 5px 10px; border-radius: 4px;">
+                                        {{ '배송 처리' if order.status == '상품 준비중' else '출고 완료' if order.status == '배송 중' else '상태 변경 불가' }}
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p>최근 판매 내역이 없습니다.</p>
+                {% endif %}
+
 
             {% elif view == 'profile' %}
             <h3>👤 회원 정보 수정</h3>
@@ -362,7 +404,7 @@
             </div>
             {% elif view == 'admin_rating' %}
             <h3>💎 굿즈 등급 부여</h3>
-<!--            TODO: 굿즈 등급 부여 기능 구현 (admin)-->
+            <!-- 굿즈 등급 부여 기능 구현 (admin)-->
             <div id="admin-update-message" style="margin-bottom: 15px; padding: 10px; border: 1px solid #ccc; display: none;">
                 여기에 업데이트 메시지가 표시됩니다.
             </div>
