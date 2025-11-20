@@ -591,7 +591,7 @@ def show_product_detail(listing_id):
                 resale_images = [dict(row) for row in cur.fetchall()]
 
             # 3. ✨ 경매 상품일 경우 Auction 정보 조회 추가 ✨
-            if data['status'] in ['경매 중', '경매 예정']:
+            if data['status'] in ['경매 중', '경매 예정', '판매 종료']:
                 cur.execute(
                     """
                     SELECT auction_id,
@@ -676,6 +676,8 @@ def show_product_detail(listing_id):
                             finally:
                                 cur_finalize.close()
                                 conn_finalize.close()
+
+
 
                             # 원래 함수로 돌아와 최종 렌더링을 진행합니다.
                             # is_auction_ended는 여전히 True입니다.
@@ -878,7 +880,7 @@ def show_mypage():
         "my_products": [],  # 기본값
         "disputes": [],  # 기본값
         "admin_disputes": [],
-        "products" : [] #product테이블의 모든 상품
+        "products": []  # product테이블의 모든 상품
     }
     if current_view == 'orders' and user_role == 'Buyer':
         template_data["orders"] = get_orders_for_buyer(user_id)
@@ -1216,14 +1218,18 @@ def auction_bid():
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
-    conn.autocommit = False  # 트랜잭션 시작
+    conn.autocommit = False
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     try:
-        # 1. 현재 경매 상태 및 가격 확인 (FOR UPDATE로 레코드 잠금)
+        # 1. ✨ 상태, 가격, 시간, 판매자 ID 조회 (v_auction_status를 활용) ✨
         cur.execute(
             """
-            SELECT current_price, start_date, end_date, calculated_auction_status, seller_id
+            SELECT current_price,
+                   start_date,
+                   end_date,
+                   calculated_auction_status AS auction_status, -- 뷰의 계산된 상태 사용
+                   seller_id
             FROM v_auction_status
             WHERE auction_id = %s
                 FOR UPDATE
@@ -1231,11 +1237,12 @@ def auction_bid():
             (auction_id,)
         )
         auction_info = cur.fetchone()
-        current_highest_price = auction_info['current_price']
 
         if not auction_info:
             conn.rollback()
             return jsonify({"error": "존재하지 않는 경매입니다."}), 404
+
+        current_highest_price = auction_info['current_price']
 
         # 본인 상품 입찰 금지
         if auction_info['seller_id'] == buyer_id:
@@ -1243,17 +1250,17 @@ def auction_bid():
             return jsonify({"error": "자신이 등록한 경매에는 입찰할 수 없습니다."}), 403
 
         # 2. 경매 상태 검증
-        if auction_info['status'] != '경매 중':
+        # 뷰에서 계산된 'auction_status' 사용
+        if auction_info['auction_status'] != '경매 중':
             conn.rollback()
-            return jsonify({"error": f"현재 '경매 중' 상태가 아닙니다. (현재 상태: {auction_info['status']})"}), 403
+            return jsonify({"error": f"현재 '경매 중' 상태가 아닙니다. (현재 상태: {auction_info['auction_status']})"}), 403
 
-        # 3. 시간 검증
-        # NOW()를 가져와 파이썬에서 비교하는 대신, DB에게 현재 시간이
-        # start_date와 end_date 사이에 있는지 물어봅니다.
+        # 3. ✨ 시간 검증 (DB 쿼리 통합) ✨
+        # DB에서 현재 시간이 시작/종료 시간 사이에 있는지 묻는 쿼리로 변경
         cur.execute(
             """
-            SELECT (NOW() AT TIME ZONE 'KST' BETWEEN "start_date" AND "end_date")
-            FROM Auction
+            SELECT (NOW() AT TIME ZONE 'KST' BETWEEN start_date AND end_date)
+            FROM Auction -- Auction 테이블에서 직접 start_date/end_date를 참조
             WHERE auction_id = %s;
             """,
             (auction_id,)
@@ -1267,9 +1274,10 @@ def auction_bid():
         # 4. 입찰 가격 검증
         if bid_price <= current_highest_price:
             conn.rollback()
-            return jsonify({"error": f"입찰가는 현재 최고가({auction_info['current_price']})보다 높아야 합니다."}), 400
+            # 포맷팅도 적용하여 사용자에게 보여줍니다.
+            return jsonify({"error": f"입찰가는 현재 최고가({current_highest_price:,.0f})보다 높아야 합니다."}), 400
 
-        # # 5. 입찰 기록 (AuctionBid)
+        # 5. 입찰 기록 (AuctionBid) - 주석 처리된 부분 주석 해제 (AuctionBid 테이블이 있다면)
         # cur.execute(
         #     "INSERT INTO AuctionBid (auction_id, buyer_id, bid_price, bid_time) VALUES (%s, %s, %s, NOW())",
         #     (auction_id, buyer_id, bid_price)
@@ -1286,6 +1294,8 @@ def auction_bid():
 
     except Exception as e:
         conn.rollback()
+        # 오류가 발생했을 경우, 오류 메시지를 더 자세히 출력합니다.
+        print(f"입찰 처리 중 오류 발생: {e}")
         return jsonify({"error": f"입찰 처리 중 오류 발생: {str(e)}"}), 500
     finally:
         cur.close()
@@ -2145,6 +2155,71 @@ def update_dispute_status():
     except Exception as e:
         conn.rollback()
         return jsonify({"error": f"분쟁 처리 트랜잭션 실패: {str(e)}"}), 500
+    finally:
+        cur.close()
+        conn.close()
+        
+        
+#구매 확정 라우터
+@app.route('/api/order/confirm_purchase', methods=['POST'])
+def confirm_purchase():
+    # 1. 권한 확인
+    if session.get('user_role') != 'Buyer':
+        return jsonify({"error": "구매자만 구매 확정을 할 수 있습니다."}), 403
+
+    data = request.json
+    order_id = data.get('order_id')
+    buyer_id = session.get('user_id')
+
+    if not order_id:
+        return jsonify({"error": "주문 ID가 필요합니다."}), 400
+
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({"error": "데이터베이스 연결 실패"}), 500
+
+    conn.autocommit = False
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    try:
+        # 2. 주문 소유권 및 현재 상태 확인 (배송 완료 상태에서만 가능)
+        cur.execute(
+            """
+            SELECT status FROM Orderb 
+            WHERE order_id = %s AND buyer_id = %s FOR UPDATE
+            """,
+            (order_id, buyer_id)
+        )
+        order_info = cur.fetchone()
+
+        if not order_info:
+            conn.rollback()
+            return jsonify({"error": "주문 ID를 찾을 수 없거나 소유권이 없습니다."}), 404
+
+        current_status = order_info['status']
+
+        # ✨ NULL 값 또는 유효하지 않은 상태 명시적 처리 ✨
+        if current_status is None:
+            conn.rollback()
+            return jsonify({"error": "DB 오류: 주문 상태가 NULL로 저장되어 있습니다."}), 500
+
+            # 2. '배송 완료' 상태 비교 (NULL 처리가 되었으므로 안전함)
+        if current_status != '배송 완료':
+            conn.rollback()
+            return jsonify({"error": f"주문 상태 '{current_status}'는 확정할 수 없습니다. '배송 완료' 상태에서만 가능합니다."}), 400
+        # 3. Orderb 상태를 '구매 확정'으로 변경
+        # (⚠️ DB의 order_status ENUM에 '구매 확정'이 추가되었다고 가정합니다.)
+        cur.execute(
+            "UPDATE Orderb SET status = '구매 확정' WHERE order_id = %s",
+            (order_id,)
+        )
+
+        conn.commit()
+        return jsonify({"message": f"주문 #{order_id}가 구매 확정되었습니다. 감사합니다.", "new_status": "구매 확정"}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"구매 확정 처리 실패: {str(e)}"}), 500
     finally:
         cur.close()
         conn.close()

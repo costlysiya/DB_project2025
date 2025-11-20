@@ -91,6 +91,11 @@
                                         <button class="btn dispute-btn btn-exchange" onclick="showDisputeModal({{ order.order_id }}, '교환')">
                                             교환 요청
                                         </button>
+                                        <button class="btn btn-success" onclick="confirmPurchase({{ order.order_id }})">
+                                            구매 확정
+                                        </button>
+                                   {% elif order.status == '구매 확정' %}
+                                        <span class="status-success">✅ 확정 완료</span>
                                     {% elif order.status in ['환불', '교환'] %}
                                         <span class="status-dispute">{{ order.status }} 처리 중</span>
                                     {% else %}
@@ -654,6 +659,36 @@
                         });
                     });
                 });
+                // 구매 확정 버튼 관련
+                async function confirmPurchase(orderId) {
+                    if (!confirm(`주문 #${orderId}의 구매를 최종 확정하시겠습니까? (환불/교환 요청 불가)`)) {
+                        return;
+                    }
+
+                    const apiUrl = '/api/order/confirm_purchase';
+                    const data = { order_id: orderId };
+
+                    try {
+                        const response = await fetch(apiUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(data)
+                        });
+
+                        const result = await response.json();
+
+                        if (response.ok) {
+                            alert(result.message);
+                            // 성공 시 페이지 새로고침하여 UI (버튼)를 갱신합니다.
+                            window.location.reload();
+                        } else {
+                            alert(`구매 확정 실패: ${result.error || result.message}`);
+                        }
+
+                    } catch (error) {
+                        alert("네트워크 오류로 구매 확정 처리에 실패했습니다.");
+                    }
+                }
                 //분쟁 처리 관련 JS로직
                 function showDisputeModal(orderId, issueType) {
                     const reason = prompt(`주문 #${orderId}에 대한 ${issueType} 요청 사유를 간단히 입력해주세요:`);
