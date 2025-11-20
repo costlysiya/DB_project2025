@@ -124,152 +124,58 @@
         </form>
     </div>
 
-    <!-- (★) 폼 내부의 CSS/JS를 위한 스타일 추가 -->
-<!--다은 TODO: style 옮기기-->
-    <style>
-        .form-container {
-            max-width: 600px;
-            margin: 20px auto;
-            padding: 30px;
-            background-color: var(--card-background);
-            border-radius: 12px;
-            border: 1px solid var(--border-color);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-        }
-        .form-container.wide {
-            max-width: 800px;
-        }
-        h2 {
-            text-align: center;
-            margin-top: 0;
-            margin-bottom: 10px;
-        }
-        .subtitle {
-            text-align: center;
-            color: var(--text-color-light);
-            margin-top: 0;
-            margin-bottom: 30px;
-        }
-        .form-group-section {
-            margin-bottom: 25px;
-        }
-        .form-group-section h3 {
-            border-bottom: 2px solid var(--border-color);
-            padding-bottom: 8px;
-            margin-bottom: 20px;
-            color: var(--primary-color);
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-        }
-        .form-group .required {
-            color: var(--resale-color);
-            font-weight: bold;
-        }
-        .form-group input[type="text"],
-        .form-group input[type="password"],
-        .form-group input[type="email"],
-        .form-group input[type="url"],
-        .form-group input[type="number"],
-        .form-group input[type="datetime-local"],
-        .form-group select,
-        .form-group textarea {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            box-sizing: border-box; /* 패딩 포함 크기 계산 */
-            font-size: 1rem;
-        }
-        .form-group textarea {
-            resize: vertical;
-            min-height: 80px;
-        }
-        .form-group .note {
-            font-size: 0.9rem;
-            color: var(--text-color-light);
-            margin-top: 8px;
-        }
-        .form-group.auction-toggle {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background-color: #fcf8e3;
-            border: 1px solid #faebcc;
-            padding: 15px;
-            border-radius: 6px;
-        }
-        .form-group.auction-toggle label {
-            margin-bottom: 0;
-            font-weight: bold;
-        }
-        .form-group.auction-toggle input[type="checkbox"] {
-            width: auto;
-            height: 1.2em;
-            width: 1.2em;
-        }
-
-        /* 유틸리티 클래스 */
-        .hidden {
-            display: none;
-        }
-        .btn {
-            display: inline-block;
-            padding: 12px 20px;
-            font-size: 1rem;
-            font-weight: bold;
-            text-align: center;
-            text-decoration: none;
-            border-radius: 6px;
-            border: none;
-            cursor: pointer;
-            transition: background-color 0.2s, color 0.2s;
-        }
-        .btn.full-width {
-            width: 100%;
-        }
-        .btn.submit-btn {
-            background-color: var(--primary-color);
-            color: white;
-            font-size: 1.1rem;
-            padding: 15px;
-        }
-        .btn.submit-btn:hover {
-            background-color: var(--button-primary-hover);
-        }
-
-        .api-message {
-            text-align: center;
-            font-weight: bold;
-            padding: 10px;
-            border-radius: 6px;
-        }
-
-    </style>
-
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const isAuctionCheckbox = document.getElementById('is_auction');
             const auctionDetailsDiv = document.getElementById('auction-details');
+            // 재고 필드 요소를 가져옵니다.
+            const stockInput = document.getElementById('stock');
 
             // isAuctionCheckbox가 Reseller가 아니면 null일 수 있으므로 체크
             if (isAuctionCheckbox) {
+
+                // 경매 상세 필드에서 제어할 항목들을 찾습니다.
                 const requiredAuctionInputs = auctionDetailsDiv.querySelectorAll('input, select');
+
+                // ⚠️ 경매 시작 가격 필드는 HTML에서 숨김 처리하거나, 여기서 항상 hidden 처리합니다.
+                const startPriceInput = document.getElementById('auction_start_price');
+                if (startPriceInput) {
+                    startPriceInput.closest('.form-group').classList.add('hidden'); // HTML에서 숨기기
+                }
+
 
                 function toggleAuctionFields() {
                     const isChecked = isAuctionCheckbox.checked;
 
+                    // 경매 시작/종료 시간 필드 (auctionDetailsDiv)만 보이거나 숨깁니다.
                     if (isChecked) {
+                        stockInput.value = 1;
+                        stockInput.min = 1;
+                        stockInput.max = 1; // 1 이상 입력 불가
+                        stockInput.readOnly = true; // 사용자 입력 방지 (선택 사항)
                         auctionDetailsDiv.classList.remove('hidden');
-                        // 경매 필드에 required 속성 추가
-                        requiredAuctionInputs.forEach(input => input.setAttribute('required', 'required'));
+
+                        // 경매 시작 및 종료 시간 필드에 required 속성 추가
+                        // startPriceInput은 이미 숨겨져 있으므로 제외하고 required를 적용해야 합니다.
+                        auctionDetailsDiv.querySelectorAll('input[type="datetime-local"]').forEach(input => {
+                            input.setAttribute('required', 'required');
+                        });
+
+                        // 일반 판매 필드 (가격, 재고 등)는 항상 보입니다 (변경 없음).
+
                     } else {
+                        // 일반 판매 모드:
+                        // 1. 재고 제한을 풀고 초기화합니다.
+                        stockInput.min = 0;
+                        stockInput.max = 9999999;
+                        stockInput.readOnly = false;
+
+                        if (stockInput.value === '1') {
+                             stockInput.value = ''; // 값을 비워 사용자에게 입력 요구
+                             stockInput.removeAttribute('placeholder');
+                        }
                         auctionDetailsDiv.classList.add('hidden');
+
                         // 경매 필드의 required 속성 제거
                         requiredAuctionInputs.forEach(input => input.removeAttribute('required'));
                     }
@@ -280,70 +186,94 @@
                 toggleAuctionFields();
             }
 
-            // --- (★신규) AJAX 폼 제출 로직 ---
+            // --- 2. AJAX 폼 제출 로직 (유지) ---
             const form = document.getElementById('product-register-form');
             const messageDiv = document.getElementById('api-message');
 
-            form.addEventListener('submit', async function(event) {
-                event.preventDefault(); // 폼의 기본 제출(페이지 새로고침)을 막음
+            if (form) {
+                 form.addEventListener('submit', async function(event) {
+                    event.preventDefault();
 
-                const formData = new FormData(form);
-                const data = {};
+                    const formData = new FormData(form);
+                    const data = {};
 
-                formData.forEach((value, key) => {
-                    // 체크박스는 'on' 또는 undefined로 오므로 boolean으로 변환
-                    if (key === 'is_auction') {
-                        data[key] = true;
-                    } else if (key === 'price' || key === 'stock' || key === 'auction_start_price') {
-                        data[key] = value ? parseInt(value, 10) : null;
-                    } else if (key === 'resale_images') {
-                        // 쉼표로 구분된 URL을 배열로 변환
-                        data[key] = value ? value.split(',').map(url => url.trim()).filter(url => url) : [];
-                    } else {
-                        data[key] = value;
-                    }
-                });
-
-                // is_auction이 체크 안됐을 때 formData에 포함이 안되므로 false로 설정
-                if (!data.is_auction) {
-                    data.is_auction = false;
-                }
-
-                messageDiv.textContent = '등록 중...';
-                messageDiv.style.color = 'var(--text-color)';
-
-                try {
-                    const response = await fetch('/api/product_register', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(data)
+                    formData.forEach((value, key) => {
+                        // is_auction 체크박스가 체크되어 있을 경우만 true로 설정
+                        if (key === 'is_auction' && value === 'true') {
+                            data[key] = true;
+                        } else if (key === 'price' || key === 'stock' || key === 'auction_start_price') {
+                            // 숫자 필드는 정수로 변환하여 전송
+                            data[key] = value ? parseInt(value, 10) : null;
+                        } else if (key === 'resale_images') {
+                            // 쉼표로 구분된 URL을 배열로 변환
+                            data[key] = value ? value.split(',').map(url => url.trim()).filter(url => url) : [];
+                        } else {
+                            data[key] = value;
+                        }
                     });
 
-                    const result = await response.json();
-
-                    if (response.ok) { // HTTP 상태 코드가 200-299일 때
-                        messageDiv.textContent = `${result.message} (Listing ID: ${result.listing_id})`;
-                        messageDiv.style.color = 'var(--primary-color)';
-                        form.reset(); // 폼 초기화
-
-                        // 2초 후 메인 페이지로 이동
-                        setTimeout(() => {
-                            window.location.href = '/';
-                        }, 2000);
-
-                    } else { // HTTP 상태 코드가 4xx, 5xx일 때
-                        messageDiv.textContent = `등록 실패: ${result.error || result.message || '알 수 없는 오류'}`;
-                        messageDiv.style.color = 'var(--resale-color)';
+                    // is_auction이 FormData에 아예 없으면 (체크 안됨), false로 설정
+                    if (!data.is_auction) {
+                        data.is_auction = false;
                     }
 
-                } catch (error) {
-                    console.error('Fetch error:', error);
-                    messageDiv.textContent = `네트워크 오류: ${error.message}`;
-                    messageDiv.style.color = 'var(--resale-color)';
-                }
-            });
+                    // ⚠️ 경매 시작 가격 (auction_start_price)에 일반 판매 가격을 대입합니다.
+                    if (data.is_auction) {
+                        data.auction_start_price = data.price;
+                    }
+
+
+                    // 만약 messageDiv가 없다면 alert로 대체
+                    if (messageDiv) {
+                        messageDiv.textContent = '등록 중...';
+                        messageDiv.style.color = 'gray';
+                    }
+
+                    try {
+                        const response = await fetch('/api/product_register', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(data)
+                        });
+
+                        const result = await response.json();
+
+                        if (response.ok) {
+                            if (messageDiv) {
+                                messageDiv.textContent = `${result.message} (Listing ID: ${result.listing_id})`;
+                                messageDiv.style.color = '#ff69b4';
+                            } else {
+                                alert(result.message);
+                            }
+                            form.reset();
+
+                            setTimeout(() => {
+                                window.location.href = '/';
+                            }, 2000);
+
+                        } else {
+                            const errorMessage = `등록 실패: ${result.error || result.message || '알 수 없는 오류'}`;
+                             if (messageDiv) {
+                                messageDiv.textContent = errorMessage;
+                                messageDiv.style.color = '#dc3545';
+                            } else {
+                                alert(errorMessage);
+                            }
+                        }
+
+                    } catch (error) {
+                        console.error('Fetch error:', error);
+                        if (messageDiv) {
+                            messageDiv.textContent = `네트워크 오류: ${error.message}`;
+                            messageDiv.style.color = '#dc3545';
+                        } else {
+                            alert(`네트워크 오류: ${error.message}`);
+                        }
+                    }
+                });
+            }
         });
     </script>
 {% endblock %}

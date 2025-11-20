@@ -29,7 +29,7 @@
                 {% if user_profile.user.role == 'Buyer' %}
                 <li><a href="{{ url_for('show_mypage', view='orders') }}" class="{% if view == 'orders' %}active{% endif %}">📦 주문/배송 내역 조회</a></li>
                 <li><a href="{{ url_for('show_mypage', view='disputes') }}" class="{% if view == 'disputes' %}active{% endif %}">📞 분쟁 처리 현황</a></li>
-                <li><a href="{{ url_for('show_mypage', view='feedback') }}" class="{% if view == 'feedback' %}active{% endif %}">⭐ 판매자 평가 남기기</a></li>
+                <li><a href="{{ url_for('show_mypage', view='feedback') }}" class="{% if view == 'feedback' %}active{% endif %}">⭐ 후기 남기기</a></li>
                 {% endif %}
 
                 {% if user_profile.user.role in ['PrimarySeller', 'Reseller'] %}
@@ -107,7 +107,7 @@
             <!--상품 목록 (Seller)-->
             <h3>📈 내 상품 목록 (재고 관리)</h3>
 
-            <!-- (★) AJAX 메시지 표시 영역 -->
+            <!-- AJAX 메시지 표시 영역 -->
             <div id="update-message-area" style="margin: 15px 0; padding: 10px; border-radius: 6px; display: none; font-weight: bold;"></div>
 
             {% if my_products %}
@@ -283,62 +283,105 @@
                 {% else %}
                     <p>최근 판매 내역이 없습니다.</p>
                 {% endif %}
-
             {% elif view == 'disputes' %}
             <!-- TODO: 분쟁 처리 현황 (Buyer) -->
             <h3>📞 분쟁 처리 현황</h3>
-            <p>환불/교환 요청 목록과 처리 상태가 여기에 표시됩니다.</p>
+                {% if disputes %}
+                <p>총 {{ disputes | length }}건의 분쟁 요청 내역이 있습니다.</p>
+
+                <table class="order-history-table">
+                    <thead>
+                        <tr>
+                            <th>요청 ID</th>
+                            <th>요청 유형</th>
+                            <th>요청 상품</th>
+                            <th>판매자</th>
+                            <th>주문 상태</th>
+                            <th>처리 상태</th>
+                            <th>사유</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for dispute in disputes %}
+                        <tr>
+                            <td>{{ dispute.dispute_id }}</td>
+                            <td><span class="issue-type issue-{{ dispute.issue_type }}">{{ dispute.issue_type }}</span></td>
+                            <td>{{ dispute.product_name }}</td>
+                            <td>{{ dispute.seller_name }}</td>
+                            <td>{{ dispute.order_status }}</td>
+
+                            <td><span class="dispute-status status-{{ dispute.dispute_status | lower | replace(' ', '') }}">{{ dispute.dispute_status }}</span></td>
+                            <td>{{ dispute.reason }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p>현재 접수된 분쟁 요청 내역이 없습니다.</p>
+            {% endif %}
 
             {% elif view == 'feedback' %}
             <!-- 내가 할 것 TODO: 판매자 평가 (Buyer) -->
-            <h3>⭐ 판매자 평가 남기기</h3>
-            <p>거래가 끝난 상품에 대해 판매자 평가하기.</p>
-                            {% if sales_orders %}
-                    <p>총 {{ sales_orders | length }}건의 판매 내역이 있습니다.</p>
+            <h3>⭐ 후기 작성하기</h3>
+            <h5>배송 완료된 상품에 대해 후기를 작성할 수 있습니다.</h5>
+                {% if finished_orders%}
+                    <p>총 {{ finished_orders | length }}건의 완료된 주문 내역이 있습니다.</p>
                     <table class="order-history-table">
                         <thead>
                             <tr>
-                                <th>상품 정보</th>
-                                <th>구매자</th>
-                                <th>주소</th>
-                                <th>수량</th>
-                                <th>총 금액</th>
+                                <th>주문 상품</th>
+                                <th>판매자</th>
                                 <th>주문 일시</th>
-                                <th>처리 상태</th>
+                                <th>별점</th>
+                                <th>코멘트</th>
                                 <th>액션</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {% for order in sales_orders %}
-                            <tr data-order-id="{{ order.order_id }}">
+                            {% for order in finished_orders %}
+                            {% set is_completed = order.feedback_submitted %}
+                            {% set disabled_attr = 'disabled' if is_completed else '' %}
+                            <tr>
                                 <td>
                                     <a href="{{ url_for('show_product_detail', listing_id=order.listing_id) }}">
                                         <img src="{{ order.image_url | default('https://placehold.co/60x60/eee/ccc?text=Goods', true) }}" alt="{{ order.product_name }}" width="40" height="40" style="margin-right: 10px; border-radius: 4px; vertical-align: middle;">
                                         {{ order.product_name }}
                                     </a>
                                 </td>
-                                <td>{{ order.buyer_name }} ({{ order.buyer_uid }})</td>
-                                <td>{{ order.buyer_address }}</td>
-                                <td>{{ order.quantity }}</td>
-                                <td>{{ "{:,.0f}원".format(order.total_price) }}</td>
+                                <td>{{ order.seller_name }}</td>
                                 <td>{{ order.order_date.strftime('%Y-%m-%d %H:%M') }}</td>
-                                <td class="order-status-{{ order.order_id }}">{{ order.status }}</td>
                                 <td>
-                                    <!--  주문 상태 변경 버튼 (클릭 이벤트 연결) -->
-                                    <button class="btn update-status-btn"
-                                            data-order-id="{{ order.order_id }}"
-                                            data-current-status="{{ order.status }}"
-                                            {% if order.status in ['배송 완료', '환불', '교환'] %} disabled {% endif %}
-                                            style="{% if order.status == '배송 중' %} background-color: orange; {% elif order.status == '상품 준비중' %} background-color: #007bff; {% else %} background-color: #6c757d; {% endif %} color: white; border: none; padding: 5px 10px; border-radius: 4px;">
-                                        {{ '배송 처리' if order.status == '상품 준비중' else '출고 완료' if order.status == '배송 중' else '상태 변경 불가' }}
-                                    </button>
+                                    <select class="form-control feedback-select" {{ disabled_attr }} >
+                                        <option value= 5 > 5 </option>
+                                        <option value= 4 > 4 </option>
+                                        <option value= 3 > 3 </option>
+                                        <option value= 2 > 2 </option>
+                                        <option value= 1 > 1 </option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <input
+                                        type="text"
+                                        class="form-control feedback-comment-input"
+                                        placeholder="후기를 입력하세요. (필수)"
+                                        {{ disabled_attr }}
+                                    >
+                                </td>
+                                <td>
+                                    {% if is_completed %}
+                                        <span style="color: green; font-weight: bold;">✅ 작성 완료</span>
+                                    {% else %}
+                                        <button class="btn feedback-btn btn-feedback" onclick="submitFeedback({{ order.order_id }},{{order.seller_id}}, this)">
+                                            후기 업로드하기
+                                        </button>
+                                    {% endif %}
                                 </td>
                             </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 {% else %}
-                    <p>최근 판매 내역이 없습니다.</p>
+                    <p>완료된 주문 내역이 없습니다.</p>
                 {% endif %}
 
 
@@ -470,11 +513,72 @@
                     <p>등록한 상품이 없습니다.</p>
                 {% endif %}
             {% elif view == 'admin_disputes' %}
-            <h3>📝 분쟁 조정</h3>
-<!--            TODO: 분쟁 조정 기능 구현(admin)-->
+            <h3>📝 분쟁 조정 및 관리</h3>
+            <p class="subtitle">구매자와 판매자 간의 환불/교환 요청을 심사하고 처리합니다.</p>
+
+            <div id="dispute-message" style="margin: 15px 0; padding: 10px; border-radius: 6px; display: none; font-weight: bold; text-align: center;"></div>
+
+            {% if admin_disputes %}
+                <p>총 {{ admin_disputes | length }}건의 분쟁 요청이 있습니다.</p>
+
+                <table class="dispute-table order-history-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>유형</th>
+                            <th>요청 상품</th>
+                            <th>구매자 / 판매자</th>
+                            <th>요청 사유</th>
+                            <th>현재 상태</th>
+                            <th>주문 상태</th>
+                            <th>처리 액션</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for dispute in admin_disputes %}
+                        <tr data-dispute-id="{{ dispute.dispute_id }}">
+                            <td>{{ dispute.dispute_id }}</td>
+                            <td><span class="issue-type issue-{{ dispute.issue_type | lower }}">{{ dispute.issue_type }}</span></td>
+                            <td>{{ dispute.product_name }}</td>
+                            <td>{{ dispute.buyer_name }} / {{ dispute.seller_name }}</td>
+                            <td style="max-width: 250px; text-align: left; font-size: 0.85em;">{{ dispute.reason | default('사유 없음') }}</td>
+
+                            <td><span class="dispute-status status-{{ dispute.status | lower | replace(' ', '') }}">{{ dispute.status }}</span></td>
+                            <td>{{ dispute.order_status }}</td>
+
+                            <td class="action-cell">
+                                {% if dispute.status == '처리 전' %}
+                                <button class="btn admin-action-btn btn-processing" onclick="updateAdminDisputeStatus({{ dispute.dispute_id }}, '처리 중', null)">
+                                    처리 시작
+                                </button>
+                                {% elif dispute.status == '처리 중' %}
+                                    <div class="dispute-resolve-group">
+                                        <button class="btn admin-action-btn btn-refund" onclick="updateAdminDisputeStatus({{ dispute.dispute_id }}, '처리 완료', '환불')">
+                                            환불 승인
+                                        </button>
+                                        <button class="btn admin-action-btn btn-exchange" onclick="updateAdminDisputeStatus({{ dispute.dispute_id }}, '처리 완료', '교환')">
+                                            교환 승인
+                                        </button>
+                                        <button class="btn admin-action-btn btn-reject" onclick="updateAdminDisputeStatus({{ dispute.dispute_id }}, '처리 완료', '거절')">
+                                            요청 거절
+                                        </button>
+                                    </div>
+                                {% else %}
+                                    - ({{ dispute.status }})
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+            {% else %}
+                <p>현재 접수된 분쟁 요청이 없습니다.</p>
+            {% endif %}
             {% elif view == 'admin_seller_eval' %}
             <h3>🏆 판매자 평가 관리</h3>
 <!--            TODO: 판매자 평가 관리 기능 구현(admin)-->
+
             {% endif %}
 
 
@@ -559,16 +663,96 @@
                 function showDisputeModal(orderId, issueType) {
                     const reason = prompt(`주문 #${orderId}에 대한 ${issueType} 요청 사유를 간단히 입력해주세요:`);
 
-                    if (reason) {
-                    //TODO:
-                        // 실제 API 호출 로직 (Dispute 테이블에 INSERT)
-                        // 현재는 구현되지 않았으므로 alert로 대체
-                        alert(`[${issueType} 요청 접수]\n주문 ID: ${orderId}\n사유: "${reason}"\n\n⚠️ 실제 분쟁 처리 API('/api/dispute/create') 구현 필요.`);
-                        // TODO: 성공 가정 시 '/api/dispute/create'를 호출하고, 성공하면 페이지를 새로고침하여 상태를 '환불 처리 중' 등으로 변경해야 함.
+                    // 사용자가 취소를 눌렀거나 빈 문자열일 경우
+                    if (!reason || reason.trim() === '') {
+                        if (reason !== null) {
+                            alert("사유를 입력해야 분쟁을 요청할 수 있습니다.");
+                        }
+                        return;
+                    }
+
+                    // 분쟁 API 호출
+                    requestDispute(orderId, issueType, reason.trim());
+                }
+                async function requestDispute(orderId, issueType, reason) {
+                    const data = {
+                        order_id: orderId,
+                        issue_type: issueType,
+                        reason: reason
+                    };
+
+                    try {
+                        const response = await fetch('/api/dispute/create', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(data)
+                        });
+
+                        const result = await response.json();
+
+                        if (response.ok) {
+                            alert(result.message);
+                            // 요청 성공 시 페이지 새로고침하여 버튼 비활성화 (선택적)
+                            window.location.reload();
+                        } else {
+                            alert(`분쟁 요청 실패: ${result.error || result.message}`);
+                        }
+
+                    } catch (error) {
+                        alert("네트워크 오류로 분쟁 요청에 실패했습니다.");
+                    }
+                }
+                async function updateAdminDisputeStatus(disputeId, newStatus, resolution) {
+                    const messageDiv = document.getElementById('dispute-message');
+
+                    // 경고창 확인
+                    if (newStatus === '처리 완료') {
+                        let action = resolution === '거절' ? '거절' : `${resolution} 승인`;
+                        if (!confirm(`분쟁 #${disputeId}에 대해 [${action}] 처리를 완료하시겠습니까? (되돌릴 수 없습니다!)`)) {
+                            return;
+                        }
+                    } else if (newStatus === '처리 중' && !confirm(`분쟁 #${disputeId}의 처리를 시작하시겠습니까?`)) {
+                        return;
+                    }
+
+                    const data = {
+                        dispute_id: disputeId,
+                        new_status: newStatus,
+                        resolution: resolution
+                    };
+
+                    messageDiv.textContent = '처리 중...';
+                    messageDiv.style.color = 'blue';
+                    messageDiv.style.display = 'block';
+
+                    try {
+                        const response = await fetch('/api/dispute/update_status', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(data)
+                        });
+
+                        const result = await response.json();
+
+                        if (response.ok) {
+                            messageDiv.textContent = `✅ ${result.message}`;
+                            messageDiv.style.color = '#2ecc71';
+                            // 상태 업데이트 반영을 위해 페이지 새로고침
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 1000);
+
+                        } else {
+                            messageDiv.textContent = `❌ 처리 실패: ${result.error || result.message}`;
+                            messageDiv.style.color = '#dc3545';
+                        }
+                    } catch (error) {
+                        messageDiv.textContent = '네트워크 오류로 처리 실패';
+                        messageDiv.style.color = '#dc3545';
                     }
                 }
                 //개인 정보 수정 관련 로직
-                                document.addEventListener('DOMContentLoaded', function() {
+                document.addEventListener('DOMContentLoaded', function() {
                     const form = document.getElementById('profile-update-form');
                     const messageArea = document.getElementById('api-message');
 
@@ -741,6 +925,57 @@
                     setTimeout(() => { messageArea.style.display = 'none'; }, 3000);
                 }
 
+                //구매자 후기 작성 로직
+                async function submitFeedback(order_id, target_seller_id, button_element) {
+
+                    // 1. 입력 데이터 수집
+                    const row = button_element.closest('tr');
+                    const ratingElement = row.querySelector('.feedback-select');
+                    const rating = parseInt(ratingElement.value);
+
+                    const commentElement = row.querySelector('.feedback-comment-input');
+                    const comment = commentElement.value;
+
+                    if (comment.trim() === '') {
+                        alert("코멘트를 입력해주세요.");
+                        return;
+                    }
+
+                    try {
+                        // 3. Flask API 호출
+                        const response = await fetch('/api/buyer/submit_feedback', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(feedbackData)
+                        });
+
+                        const result = await response.json();
+
+                        if (!response.ok) {
+                            // 4. API 실패 처리 (400, 409 등 오류)
+                            alert("후기 작성 실패: " + (result.error || result.message));
+                            button_element.textContent = '재시도';
+                            button_element.disabled = false;
+                            return;
+                        }
+
+                        // 5. 성공 시 UI 업데이트
+                        alert(result.message);
+
+                        // 작성 완료된 행을 비활성화 처리, UI 즉시 변경
+                        row.style.backgroundColor = '#e0ffe0';
+                        button_element.textContent = '작성 완료';
+                        button_element.disabled = true;
+                        ratingElement.disabled = true;
+                        commentElement.disabled = true;
+
+                    } catch (error) {
+                        // 네트워크 오류 처리
+                        alert("후기 작성 중 네트워크 오류가 발생했습니다.");
+                        button_element.textContent = '오류';
+                        button_element.disabled = false;
+                    }
+                }
             </script>
         </div>
     </div>
