@@ -4,7 +4,6 @@ from psycopg2 import extras
 import os
 import datetime
 from decimal import Decimal
-from functools import wraps
 
 app = Flask(__name__)
 
@@ -1232,31 +1231,27 @@ def auction_bid():
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
-    conn.autocommit = False
+    conn.autocommit = False  # 트랜잭션 시작
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     try:
-        # 1. ✨ 상태, 가격, 시간, 판매자 ID 조회 (v_auction_status를 활용) ✨
+        # 1. 현재 경매 상태 및 가격 확인 (FOR UPDATE로 레코드 잠금)
         cur.execute(
             """
-            SELECT current_price,
-                   start_date,
-                   end_date,
-                   calculated_auction_status AS auction_status, -- 뷰의 계산된 상태 사용
-                   seller_id
-            FROM v_auction_status
-            WHERE auction_id = %s
+            SELECT A.current_price, A.start_date, A.end_date, L.status, L.seller_id
+            FROM Auction A
+                     JOIN Listing L ON A.listing_id = L.listing_id
+            WHERE A.auction_id = %s
                 FOR UPDATE
             """,
             (auction_id,)
         )
         auction_info = cur.fetchone()
+        current_highest_price = auction_info['current_price']
 
         if not auction_info:
             conn.rollback()
             return jsonify({"error": "존재하지 않는 경매입니다."}), 404
-
-        current_highest_price = auction_info['current_price']
 
         # 본인 상품 입찰 금지
         if auction_info['seller_id'] == buyer_id:
@@ -1264,17 +1259,17 @@ def auction_bid():
             return jsonify({"error": "자신이 등록한 경매에는 입찰할 수 없습니다."}), 403
 
         # 2. 경매 상태 검증
-        # 뷰에서 계산된 'auction_status' 사용
-        if auction_info['auction_status'] != '경매 중':
+        if auction_info['status'] != '경매 중':
             conn.rollback()
-            return jsonify({"error": f"현재 '경매 중' 상태가 아닙니다. (현재 상태: {auction_info['auction_status']})"}), 403
+            return jsonify({"error": f"현재 '경매 중' 상태가 아닙니다. (현재 상태: {auction_info['status']})"}), 403
 
-        # 3. ✨ 시간 검증 (DB 쿼리 통합) ✨
-        # DB에서 현재 시간이 시작/종료 시간 사이에 있는지 묻는 쿼리로 변경
+        # 3. 시간 검증
+        # NOW()를 가져와 파이썬에서 비교하는 대신, DB에게 현재 시간이
+        # start_date와 end_date 사이에 있는지 물어봅니다.
         cur.execute(
             """
-            SELECT (NOW() AT TIME ZONE 'KST' BETWEEN start_date AND end_date)
-            FROM Auction -- Auction 테이블에서 직접 start_date/end_date를 참조
+            SELECT (NOW() AT TIME ZONE 'KST' BETWEEN "start_date" AND "end_date")
+            FROM Auction
             WHERE auction_id = %s;
             """,
             (auction_id,)
@@ -1288,14 +1283,13 @@ def auction_bid():
         # 4. 입찰 가격 검증
         if bid_price <= current_highest_price:
             conn.rollback()
-            # 포맷팅도 적용하여 사용자에게 보여줍니다.
-            return jsonify({"error": f"입찰가는 현재 최고가({current_highest_price:,.0f})보다 높아야 합니다."}), 400
+            return jsonify({"error": f"입찰가는 현재 최고가({auction_info['current_price']})보다 높아야 합니다."}), 400
 
-        # 5. 입찰 기록 (AuctionBid) - 주석 처리된 부분 주석 해제 (AuctionBid 테이블이 있다면)
-        # cur.execute(
-        #     "INSERT INTO AuctionBid (auction_id, buyer_id, bid_price, bid_time) VALUES (%s, %s, %s, NOW())",
-        #     (auction_id, buyer_id, bid_price)
-        # )
+        # 5. 입찰 기록 (AuctionBid)
+        cur.execute(
+            "INSERT INTO AuctionBid (auction_id, buyer_id, bid_price, bid_time) VALUES (%s, %s, %s, NOW())",
+            (auction_id, buyer_id, bid_price)
+        )
 
         # 6. 경매 정보 업데이트 (Auction)
         cur.execute(
@@ -1308,8 +1302,6 @@ def auction_bid():
 
     except Exception as e:
         conn.rollback()
-        # 오류가 발생했을 경우, 오류 메시지를 더 자세히 출력합니다.
-        print(f"입찰 처리 중 오류 발생: {e}")
         return jsonify({"error": f"입찰 처리 중 오류 발생: {str(e)}"}), 500
     finally:
         cur.close()
@@ -1317,7 +1309,6 @@ def auction_bid():
 
 
 #  경매 종료 및 자동 주문 기능
-# TODO: 경매 종료 후 자동으로 orderb테이블에 추가되는거 어디에 연결?
 @app.route('/api/auction/finalize', methods=['POST'])
 def finalize_auction():
     data = request.json
@@ -1337,9 +1328,10 @@ def finalize_auction():
         # 1. 경매 정보 및 최고 입찰자 확인 (FOR UPDATE로 레코드 잠금)
         cur.execute(
             """
-            SELECT *
-            FROM v_auction_status 
-            WHERE auction_id = %s
+            SELECT A.listing_id, A.current_price, A.current_highest_bidder_id, A.end_date, L.status
+            FROM Auction A
+                     JOIN Listing L ON A.listing_id = L.listing_id
+            WHERE A.auction_id = %s
                 FOR UPDATE
             """,
             (auction_id,)
@@ -2218,8 +2210,8 @@ def update_dispute_status():
     finally:
         cur.close()
         conn.close()
-        
-        
+
+
 #구매 확정 라우터
 @app.route('/api/order/confirm_purchase', methods=['POST'])
 def confirm_purchase():
