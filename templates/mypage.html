@@ -321,7 +321,6 @@
             {% endif %}
 
             {% elif view == 'feedback' %}
-            <!-- 내가 할 것 TODO: 판매자 평가 (Buyer) -->
             <h3>⭐ 후기 작성하기</h3>
             <h5>배송 완료된 상품에 대해 후기를 작성할 수 있습니다.</h5>
                 {% if finished_orders%}
@@ -480,15 +479,12 @@
                                     {{product.name}}
                                 </td>
                                 <td>
-                                    <!-- 카테고리 -->
                                     {{product.category}}
                                 </td>
                                 <td>
-                                    <!-- 상품 설명 -->
                                     {{product.description}}
                                 </td>
                                 <td>
-                                    <!-- 등록된 동일 상품 수 -->
                                     {{product.product_count}}
                                 </td>
                               <td data-field="listing_status" class="editable-cell">
@@ -575,9 +571,54 @@
             {% else %}
                 <p>현재 접수된 분쟁 요청이 없습니다.</p>
             {% endif %}
+
             {% elif view == 'admin_seller_eval' %}
             <h3>🏆 판매자 평가 관리</h3>
 <!--            TODO: 판매자 평가 관리 기능 구현(admin)-->
+                {% if all_feedback%}
+                    <p>총 {{ all_feedback | length }}건의 후기들이 있습니다.</p>
+                    <table class="order-history-table">
+                        <thead>
+                            <tr>
+                                <th>주문 번호</th>
+                                <th>판매자</th>
+                                <th>별점</th>
+                                <th>코멘트</th>
+                                <th>액션</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for feedback in all_feedback %}
+                            {% set is_completed = feedback.is_checked %}
+                            {% set disabled_attr = 'disabled' if is_completed else '' %}
+                            <tr>
+                                <td>
+                                    <a href="{{ url_for('show_product_detail', listing_id=feedback.listing_id) }}">
+                                        {{ feedback.order_id }}
+                                    </a>
+                                </td>
+                                <td>{{ feedback.seller_name }}</td>
+                                <td>{{feedback.rating}}</td>
+                                <td>{{feedback.comment}}</td>
+                                <td>
+                                    {% if is_completed %}
+                                        <span style="color: green; font-weight: bold;">✅ 확인 완료</span>
+                                    {% else %}
+                                        <button class="btn feedback-btn btn-feedback" onclick="CheckFeedback({{feedback.feedback_id}},{{ feedback.order_id }},{{feedback.target_seller_id}}, this)">
+                                            승인
+                                        </button>
+                                        <button class="btn feedback-btn btn-feedback" onclick="RejectFeedback({{feedback.feedback_id}},{{ feedback.order_id }},{{feedback.target_seller_id}}, this)">
+                                            거절
+                                        </button>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p>작성된 판매자 후기가 없습니다.</p>
+                {% endif %}
 
             {% endif %}
 
@@ -925,6 +966,8 @@
                     setTimeout(() => { messageArea.style.display = 'none'; }, 3000);
                 }
 
+    // //////////////////////피드백 관련 로직 /////////////////////////////////
+    // //////////////////////////////////////////////////////////////////////
                 //구매자 후기 작성 로직
                 async function submitFeedback(order_id, target_seller_id, button_element) {
 
@@ -976,6 +1019,66 @@
                         button_element.disabled = false;
                     }
                 }
+
+                //관리자의 피드백 승인 처리
+                async function callFeedbackAPI(feedback_id, order_id, seller_id, action, button_element) {
+                    button_element.disabled = true;
+                    const originalText = button_element.textContent;
+                    button_element.textContent = '처리 중...';
+
+                    const requestData = {
+                        feedback_id: feedback_id,
+                        order_id: order_id,
+                        seller_id: seller_id,
+                        action: action
+                    };
+
+                    try {
+                        const response = await fetch('/api/admin/feedback/process', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(requestData)
+                        });
+
+                        const result = await response.json();
+
+                        if (!response.ok) {
+                            alert("처리 실패: " + (result.error || result.message));
+                            button_element.textContent = '실패';
+                            button_element.style.backgroundColor = 'red';
+                            button_element.disabled = false;
+                            return;
+                        }
+
+                        // 성공 시 UI 업데이트
+                        alert(result.message);
+                        const row = button_element.closest('tr');
+
+                        if (action === 'approve') {
+                            // 승인 시: 버튼을 '확인 완료' 상태로 변경
+                            row.cells[4].innerHTML = '<span style="color: green; font-weight: bold;">✅ 확인 완료</span>';
+                            row.style.backgroundColor = '#f0fff0'; // 밝은 녹색 배경
+                        } else if (action === 'reject') {
+                            // 거절 시: 행을 테이블에서 제거
+                            row.remove();
+                        }
+                    } catch (error) {
+                        alert("네트워크 오류가 발생했습니다.");
+                        button_element.textContent = originalText;
+                        button_element.disabled = false;
+                    }
+                }
+                window.CheckFeedback = function(feedback_id, order_id, seller_id, button_element) {
+                    if (confirm("이 후기를 승인하고 판매자 평가에 반영하시겠습니까?")) {
+                        callFeedbackAPI(feedback_id, order_id, seller_id, 'approve', button_element);
+                    }
+                };
+
+                window.RejectFeedback = function(feedback_id, order_id, seller_id, button_element) {
+                    if (confirm("이 후기를 거절하고 삭제하시겠습니까? (통계 미반영)")) {
+                        callFeedbackAPI(feedback_id, order_id, seller_id, 'reject', button_element);
+                    }
+                };
             </script>
         </div>
     </div>

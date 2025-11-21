@@ -500,9 +500,11 @@ def get_all_feedback_for_admin():
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
         cur.execute("""
-                    SELECT F.*
-                    FROM feedback F
-                    WHERE is_checked = false;
+                    SELECT F.*, O.listing_id, U.name as seller_name
+                    FROM feedback F, orderb O, Users U
+                    WHERE O.feedback_submitted = true 
+                        and F.order_id=O.order_id
+                    	and F.target_seller_id=U.user_id;
                     """)
         feedbacks = [dict(row) for row in cur.fetchall()]
 
@@ -514,6 +516,45 @@ def get_all_feedback_for_admin():
             conn.close()
         print(f"구매자 분쟁 현황 조회 오류: {e}")
         return []
+
+#판매자 후기에 따른 등급 결정 함수 (admin)
+def update_seller_evaluation(cur, conn, seller_id):
+    # 1. is_checked=TRUE인 피드백만 사용하여 평균 점수 계산
+    # COALESCE(AVG(score), 0.0)를 사용하여 피드백이 하나도 없으면 0.0을 반환하도록 처리
+    cur.execute("""
+        SELECT COALESCE(AVG(rating), 0.0) 
+        FROM Feedback 
+        WHERE target_seller_id = %s AND is_checked = TRUE
+    """, (seller_id,))
+
+    # DB 결과는 Decimal 타입일 수 있으므로, 비교를 위해 float로 명시적 변환
+    avg_score = float(cur.fetchone()[0])
+
+    # 2. 평균 점수를 기반으로 등급(grade) 결정
+    if avg_score == 5.0:
+        grade = 'platinum'
+    elif avg_score >= 4.0:
+        grade = 'gold'
+    elif avg_score >= 3.0:
+        grade = 'silver'
+    else:  # 3.0 미만 또는 피드백이 아예 없는 경우 (avg_score 0.0)
+        grade = 'bronze'
+
+    # 3. SellerEvaluation 테이블 갱신 (UPSERT 로직)
+    # 3-1. 기존 행이 있으면 업데이트
+    cur.execute("""
+        UPDATE SellerEvaluation
+        SET avg_score = %s, grade = %s
+        WHERE seller_id = %s
+    """, (avg_score, grade, seller_id,))
+
+    # 3-2. 갱신된 행이 없으면 새로 삽입 (처음 평가를 받는 판매자일 경우)
+    if cur.rowcount == 0:
+        cur.execute("""
+            INSERT INTO SellerEvaluation (seller_id, avg_score, grade)
+            VALUES (%s, %s, %s)
+        """, (seller_id, avg_score, grade,))
+    #update_seller_evaluation 함수 내에서는 commit을 수행하지 않고, 트랜잭션의 최종 commit은 api_admin_seller_eval에서 한 번만 처리함.
 
 # 페이지 렌더링 라우터 (HTML)
 
@@ -921,7 +962,7 @@ def show_mypage():
         "products": [], #product테이블의 모든 상품(관리자가 보는 용도)
         "disputes": [],  # 기본값
         "admin_disputes": [],
-        "all_feedback" : []
+        "all_feedback": []
     }
     if current_view == 'orders' and user_role == 'Buyer':
         template_data["orders"] = get_orders_for_buyer(user_id, 'all_status')
@@ -2235,7 +2276,7 @@ def submit_feedback():
         cur.execute("""
                     INSERT INTO feedback (order_id, target_seller_id, rating, comment)
                     VALUES (%s, %s, %s, %s);
-                """, (order_id, target_seller_id, rating, comment))
+                """, (order_id, target_seller_id, rating, comment,))
 
         # 2. ORDERB 테이블의 feedback_submitted 컬럼 업데이트 (UPDATE)
         cur.execute("""
@@ -2252,10 +2293,88 @@ def submit_feedback():
         conn.close()
 
 
+#관리자 -> 구매자가 올린 판매자 평가 내역 확인 후 승인
+@app.route('/api/admin/feedback/process', methods=['POST'])
+def api_admin_seller_eval():
+    data = request.json
 
-# @app.route('/api/admin_seller_eval', method=['POST'])
-# def api_admin_seller_eval():
-#     #TODO: 관리자 -> 구매자가 올린 판매자 평가 내역 확인 후 승인
+    # 1. 필수 입력값 받기
+    feedback_id = data.get('feedback_id')
+    order_id = data.get('order_id')
+    seller_id = data.get('seller_id')
+    action = data.get('action')  # 'approve' (승인) 또는 'reject' (거절)
+
+    if not all([feedback_id, order_id, seller_id, action]):
+        return jsonify({"error": "필수 입력 항목이 누락되었습니다."}), 400
+
+    if action not in ['approve', 'reject']:
+        return jsonify({"error": "유효하지 않은 액션입니다."}), 400
+
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({"error": "DB 연결 실패"}), 500
+
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        # 2. 피드백 유효성 확인 및 현재 상태 조회
+        cur.execute(
+            "SELECT is_checked FROM Feedback WHERE feedback_id = %s AND order_id = %s AND target_seller_id = %s",
+            (feedback_id, order_id, seller_id)
+        )
+        feedback_row = cur.fetchone()
+
+        if not feedback_row:
+            conn.rollback()
+            return jsonify({"error": "해당 조건의 피드백을 찾을 수 없습니다."}), 404
+
+        is_checked = feedback_row[0]
+
+        # 3. 액션에 따른 DB 처리
+        if action == 'approve':
+            # 3-1. 이미 승인된 경우 중복 처리 방지
+            if is_checked:
+                conn.rollback()
+                return jsonify({"error": "이미 승인된 피드백입니다. 중복 처리할 수 없습니다."}), 400
+
+            # 3-2. 승인: Feedback 테이블의 is_checked를 TRUE로 변경
+            cur.execute(
+                "UPDATE Feedback SET is_checked = TRUE WHERE feedback_id = %s",
+                (feedback_id,)
+            )
+
+            # 4. SellerEvaluation 갱신
+            update_seller_evaluation(cur, conn, seller_id)
+
+            message = "피드백이 승인되었으며, 판매자 평가에 반영되었습니다."
+
+        elif action == 'reject':
+            # 3-3. 거절: Feedback 테이블에서 해당 행 DELETE
+            cur.execute("DELETE FROM Feedback WHERE feedback_id = %s", (feedback_id,))
+
+            # 4. SellerEvaluation 갱신 (삭제 후에도 평점을 재계산하여 반영)
+            update_seller_evaluation(cur, conn, seller_id)
+
+            message = "피드백이 거절되었으며, 통계에서 제외되었습니다."
+
+        conn.commit()
+        return jsonify({"message": message, "feedback_id": feedback_id, "action": action}), 200
+
+    except Exception as e:
+        # 트랜잭션 오류 발생 시 롤백
+        conn.rollback()
+        # 개발자 디버깅을 위해 상세 오류 메시지 로깅
+        print(f"피드백 처리 트랜잭션 실패 오류: {str(e)}")
+        return jsonify({"error": f"서버 처리 중 오류가 발생했습니다."}), 500
+    finally:
+        # DB 자원 해제
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+
 
 
 
