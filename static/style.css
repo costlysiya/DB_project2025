@@ -1018,6 +1018,16 @@ h2 {
 .issue-환불 { background-color: #fbe5e5; color: #e74c3c; }
 .issue-교환 { background-color: #e5f5fbe; color: #3498db; }
 
+/* 분쟁 처리 버튼 그룹 내에서 '거절' 버튼에 대한 스타일 */
+.dispute-resolve-group .btn-reject {
+    /* 배경색을 지정하여 항상 보이게 함 */
+    background-color: #e74c3c; /* 빨간색 계열 */
+    color: white !important;
+    border: none;
+    /* 만약 hover 스타일로 opacity나 color가 조작되고 있다면 제거/재정의 */
+    opacity: 1 !important;
+}
+
 /* 액션 버튼 */
 .admin-action-btn {
     padding: 6px 10px;

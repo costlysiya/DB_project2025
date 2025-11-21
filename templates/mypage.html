@@ -81,7 +81,7 @@
                                 <td>{{ "{:,.0f}원".format(order.total_price) }}</td>
                                 <td>{{ order.order_date.strftime('%Y-%m-%d %H:%M') }}</td>
                                 <td>{{ order.status }}</td>
-                                <td>
+                                <td class="action-cell">
                                     {% if order.status == '배송 완료' %}
                                         <button class="btn dispute-btn btn-refund" onclick="showDisputeModal({{ order.order_id }}, '환불')">
                                             환불 요청
@@ -92,10 +92,23 @@
                                         <button class="btn btn-success" onclick="confirmPurchase({{ order.order_id }})">
                                             구매 확정
                                         </button>
-                                   {% elif order.status == '구매 확정' %}
+                                    {% elif order.status == '구매 확정' %}
                                         <span class="status-success">✅ 확정 완료</span>
                                     {% elif order.status in ['환불', '교환'] %}
-                                        <span class="status-dispute">{{ order.status }} 처리 중</span>
+                                        {% if order.dispute_status == '처리 완료' %}
+                                            {% if order.status == '환불' %}
+                                                <span class="status-dispute status-refund-complete">✅ 환불 완료</span>
+                                            {% elif order.status == '교환' %}
+                                                <span class="status-dispute status-exchange-complete">✅ 교환 완료</span>
+                                            {% endif %}
+                                        {% elif order.dispute_status == '처리 중' %}
+                                            <span class="status-dispute status-processing">{{ order.status }} 처리 중</span>
+                                        {% elif order.dispute_status == '처리 전' %}
+                                            <span class="status-dispute status-pending">요청 접수 대기</span>
+                                        {% else %}
+                                            -
+                                            <!--<span class="status-dispute status-processing">{{ order.status }} 처리 중</span> -->
+                                        {% endif %}
                                     {% else %}
                                          -
                                     {% endif %}
@@ -818,6 +831,15 @@
                             }, 1000);
 
                         } else {
+                            const errorMessage = result.error || result.message;
+
+                            if (errorMessage === "논리적 오류") {
+                                // 백엔드에서 반환된 상세 메시지를 alert로 띄워 관리자에게 재확인 요구
+                                alert(result.message);
+                            } else {
+                                 // 일반적인 DB 또는 API 오류 처리
+                                 alert(`❌ 처리 실패: ${errorMessage}`);
+                            }
                             messageDiv.textContent = `❌ 처리 실패: ${result.error || result.message}`;
                             messageDiv.style.color = '#dc3545';
                         }

@@ -249,20 +249,24 @@ def get_orders_for_buyer(user_id, order_status):
         if order_status == 'all_status':
             cur.execute("""
                         SELECT O.order_id,
-                               O.quantity,
-                               O.total_price,
-                               O.order_date,
-                               O.status,
-                               V.product_name,
-                               V.seller_name,
-                               V.image_url,
-                               V.listing_id
-                        FROM orderb O,
-                             v_all_products V
-                        WHERE O.buyer_id = %s
-                          and O.listing_id = V.listing_id
-                        ORDER BY O.order_date DESC;
-                        """, (user_id,))
+                           O.quantity,
+                           O.total_price,
+                           O.order_date,
+                           O.status,
+                           V.product_name,
+                           V.seller_name,
+                           V.image_url,
+                           V.listing_id,
+                            -- ✨ 해당 주문의 최근 분쟁 정보를 조회합니다. (LEFT JOIN 사용) ✨
+                            D.status AS dispute_status,
+                            D.issue_type
+                    FROM orderb O
+                    JOIN v_all_products V ON O.listing_id = V.listing_id
+                    LEFT JOIN Dispute D ON O.order_id = D.order_id
+                    WHERE O.buyer_id = %s
+                      and O.listing_id = V.listing_id
+                    ORDER BY O.order_date DESC;
+                    """, (user_id,))
 
         elif order_status == 'finished_order':
             cur.execute("""
@@ -975,6 +979,7 @@ def show_mypage():
         "my_products": [],  # 기본값
         "disputes": [],  # 기본값
         "admin_disputes": [],
+        "products": [],  # product테이블의 모든 상품
         "all_feedback": []
     }
     if current_view == 'orders' and user_role == 'Buyer':
@@ -1335,7 +1340,7 @@ def auction_bid():
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     try:
-        # 1. 현재 경매 상태 및 가격 확인 (FOR UPDATE로 레코드 잠금)
+        # 1. ✨ 상태, 가격, 시간, 판매자 ID 조회 (v_auction_status를 활용) ✨
         cur.execute(
             """
             SELECT current_price, start_date, end_date, calculated_auction_status, seller_id
@@ -1346,11 +1351,12 @@ def auction_bid():
             (auction_id,)
         )
         auction_info = cur.fetchone()
-        current_highest_price = auction_info['current_price']
 
         if not auction_info:
             conn.rollback()
             return jsonify({"error": "존재하지 않는 경매입니다."}), 404
+
+        current_highest_price = auction_info['current_price']
 
         # 본인 상품 입찰 금지
         if auction_info['seller_id'] == buyer_id:
@@ -1384,7 +1390,7 @@ def auction_bid():
             conn.rollback()
             return jsonify({"error": f"입찰가는 현재 최고가({auction_info['current_price']})보다 높아야 합니다."}), 400
 
-        # # 5. 입찰 기록 (AuctionBid)
+        # 5. 입찰 기록 (AuctionBid) - 주석 처리된 부분 주석 해제 (AuctionBid 테이블이 있다면)
         # cur.execute(
         #     "INSERT INTO AuctionBid (auction_id, buyer_id, bid_price, bid_time) VALUES (%s, %s, %s, NOW())",
         #     (auction_id, buyer_id, bid_price)
@@ -2100,7 +2106,10 @@ def create_dispute():
 
         if order_info[0] != '배송 완료':
             conn.rollback()
-            return jsonify({"error": f"분쟁 요청은 '배송 완료' 상태에서만 가능합니다. (현재 상태: {order_info[0]})"}), 403
+            if order_info[0] == '구매 확정':
+                return jsonify({"error": "이미 구매 확정된 주문입니다. 분쟁 요청이 불가능합니다."}), 403
+            else:
+                return jsonify({"error": f"분쟁 요청은 '배송 완료' 상태에서만 가능합니다. (현재 상태: {order_info[0]})"}), 403
 
         # 2. 이미 해당 주문에 대한 분쟁이 있는지 확인 (선택적)
         cur.execute("SELECT 1 FROM Dispute WHERE order_id = %s", (order_id,))
@@ -2117,6 +2126,11 @@ def create_dispute():
             (order_id, admin_id, issue_type, reason)
         )
         dispute_id = cur.fetchone()[0]
+
+        cur.execute(
+            "UPDATE Orderb SET status = %s WHERE order_id = %s",
+            (issue_type, order_id)  # issue_type은 '환불' 또는 '교환'이므로 ENUM에 맞는 값입니다.
+        )
 
         # 4. 트랜잭션 커밋
         conn.commit()
@@ -2175,19 +2189,54 @@ def update_dispute_status():
         if new_dispute_status == '처리 완료':
 
             if resolution == '거절':
-                message = f"분쟁 #{dispute_id} 요청이 관리자에 의해 거절되어 처리가 완료되었습니다."
+                cur.execute(
+                    "UPDATE Orderb SET status = '구매 확정' WHERE order_id = %s AND status IN ('환불', '교환')",
+                    (order_id,)
+                )
+                message = f"분쟁 #{dispute_id} 요청이 관리자에 의해 거절되어 처리가 완료되었습니다. 주문 상태가 '구매 확정'으로 변경되었습니다."
 
             elif resolution in ['환불', '교환']:
                 # 3-1. 승인: Orderb 테이블 상태를 연쇄 업데이트 (Transaction)
 
                 # Dispute의 Issue_type과 Resolution이 일치하는지 확인 (선택적)
-                # if dispute_info['issue_type'] != resolution: ...
+                if resolution != dispute_issue_type:
+                    # ⚠️ 경고: 요청 유형과 승인 유형이 다름 (예: '환불' 요청인데 '교환 승인'을 누름)
+                    conn.rollback()
+                    return jsonify({
+                        "error": "논리적 오류",
+                        "message": f"요청 유형('{dispute_issue_type}')과 승인 유형('{resolution}')이 다릅니다. 다시 확인하세요."
+                    }), 400
+
+                # A. 주문 상세 정보 조회 (재고 복원을 위해 주문 수량과 listing_id 필요)
+                # Orderb 테이블은 Orderb.listing_id와 Orderb.quantity를 가지고 있습니다.
+                cur.execute(
+                    "SELECT listing_id, quantity FROM Orderb WHERE order_id = %s",
+                    (order_id,)
+                )
+                order_details = cur.fetchone()
+
+                if not order_details:
+                    conn.rollback()
+                    return jsonify({"error": "주문 상세 정보를 찾을 수 없습니다."}), 500
+
+                listing_id = order_details['listing_id']
+                quantity = order_details['quantity']
 
                 cur.execute(
                     "UPDATE Orderb SET status = %s WHERE order_id = %s",
                     (resolution, order_id)  # Orderb 상태를 '환불' 또는 '교환'으로 변경
                 )
-                message = f"분쟁 #{dispute_id} 승인: 주문 #{order_id}가 '{resolution}' 상태로 변경되었습니다."
+
+                # C. ✨ 환불일 경우에만 Listing 재고 복원 (핵심) ✨
+                if resolution == '환불':
+                    cur.execute(
+                        "UPDATE Listing SET stock = stock + %s, status = '판매중' WHERE listing_id = %s",
+                        (quantity, listing_id)
+                    )
+                    message = f"분쟁 #{dispute_id} 승인: 주문 #{order_id}가 환불 처리되었으며, 재고 {quantity}개가 복원되었습니다."
+                else:
+                    # 교환일 경우 재고 복원 없이 Orderb 상태만 변경
+                    message = f"분쟁 #{dispute_id} 승인: 주문 #{order_id}가 '{resolution}' 상태로 변경되었습니다."
 
                 # TODO: [필수] 환불 시 Listing 재고 복원 또는 재고/재입고 처리 로직 추가 필요
 
