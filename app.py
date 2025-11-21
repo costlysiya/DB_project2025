@@ -246,14 +246,28 @@ def get_orders_for_buyer(user_id):
                            V.product_name,
                            V.seller_name,
                            V.image_url,
-                           V.listing_id
-                    FROM orderb O,
-                         v_all_products V
+                           V.listing_id,
+                            -- ✨ 해당 주문의 최근 분쟁 정보를 조회합니다. (LEFT JOIN 사용) ✨
+                            D.status AS dispute_status,
+                            D.issue_type
+                    FROM orderb O
+                    JOIN v_all_products V ON O.listing_id = V.listing_id
+                    LEFT JOIN Dispute D ON O.order_id = D.order_id
                     WHERE O.buyer_id = %s
                       and O.listing_id = V.listing_id
                     ORDER BY O.order_date DESC;
                     """, (user_id,))
-        orders = [dict(row) for row in cur.fetchall()]
+        orders_raw = cur.fetchall()
+
+        # 템플릿에 전달할 최종 리스트 생성
+        orders = []
+        for row in orders_raw:
+            order = dict(row)
+
+            # ⚠️ 상태 필터링은 Jinja2에서 수행하고 모든 데이터를 일단 전달합니다.
+
+            orders.append(order)
+
         cur.close()
         conn.close()
         return orders
@@ -2053,7 +2067,10 @@ def create_dispute():
 
         if order_info[0] != '배송 완료':
             conn.rollback()
-            return jsonify({"error": f"분쟁 요청은 '배송 완료' 상태에서만 가능합니다. (현재 상태: {order_info[0]})"}), 403
+            if order_info[0] == '구매 확정':
+                return jsonify({"error": "이미 구매 확정된 주문입니다. 분쟁 요청이 불가능합니다."}), 403
+            else:
+                return jsonify({"error": f"분쟁 요청은 '배송 완료' 상태에서만 가능합니다. (현재 상태: {order_info[0]})"}), 403
 
         # 2. 이미 해당 주문에 대한 분쟁이 있는지 확인 (선택적)
         cur.execute("SELECT 1 FROM Dispute WHERE order_id = %s", (order_id,))
@@ -2070,6 +2087,11 @@ def create_dispute():
             (order_id, admin_id, issue_type, reason)
         )
         dispute_id = cur.fetchone()[0]
+
+        cur.execute(
+            "UPDATE Orderb SET status = %s WHERE order_id = %s",
+            (issue_type, order_id)  # issue_type은 '환불' 또는 '교환'이므로 ENUM에 맞는 값입니다.
+        )
 
         # 4. 트랜잭션 커밋
         conn.commit()
@@ -2113,6 +2135,10 @@ def update_dispute_status():
             return jsonify({"error": "존재하지 않는 분쟁 ID입니다."}), 404
 
         order_id = dispute_info['order_id']
+        dispute_issue_type = dispute_info['issue_type']  # 요청된 분쟁 유형 ('환불' 또는 '교환')
+
+        cur.execute("SELECT status FROM Orderb WHERE order_id = %s", (order_id,))
+        order_status = cur.fetchone()[0]
 
         # 2. Dispute 테이블 상태 업데이트
         cur.execute(
@@ -2126,24 +2152,58 @@ def update_dispute_status():
         if new_dispute_status == '처리 완료':
 
             if resolution == '거절':
-                message = f"분쟁 #{dispute_id} 요청이 관리자에 의해 거절되어 처리가 완료되었습니다."
+                cur.execute(
+                    "UPDATE Orderb SET status = '구매 확정' WHERE order_id = %s AND status IN ('환불', '교환')",
+                    (order_id,)
+                )
+                message = f"분쟁 #{dispute_id} 요청이 관리자에 의해 거절되어 처리가 완료되었습니다. 주문 상태가 '구매 확정'으로 변경되었습니다."
 
             elif resolution in ['환불', '교환']:
                 # 3-1. 승인: Orderb 테이블 상태를 연쇄 업데이트 (Transaction)
 
                 # Dispute의 Issue_type과 Resolution이 일치하는지 확인 (선택적)
-                # if dispute_info['issue_type'] != resolution: ...
+                if resolution != dispute_issue_type:
+                    # ⚠️ 경고: 요청 유형과 승인 유형이 다름 (예: '환불' 요청인데 '교환 승인'을 누름)
+                    conn.rollback()
+                    return jsonify({
+                        "error": "논리적 오류",
+                        "message": f"요청 유형('{dispute_issue_type}')과 승인 유형('{resolution}')이 다릅니다. 다시 확인하세요."
+                    }), 400
+
+                # A. 주문 상세 정보 조회 (재고 복원을 위해 주문 수량과 listing_id 필요)
+                # Orderb 테이블은 Orderb.listing_id와 Orderb.quantity를 가지고 있습니다.
+                cur.execute(
+                    "SELECT listing_id, quantity FROM Orderb WHERE order_id = %s",
+                    (order_id,)
+                )
+                order_details = cur.fetchone()
+
+                if not order_details:
+                    conn.rollback()
+                    return jsonify({"error": "주문 상세 정보를 찾을 수 없습니다."}), 500
+
+                listing_id = order_details['listing_id']
+                quantity = order_details['quantity']
 
                 cur.execute(
                     "UPDATE Orderb SET status = %s WHERE order_id = %s",
                     (resolution, order_id)  # Orderb 상태를 '환불' 또는 '교환'으로 변경
                 )
-                message = f"분쟁 #{dispute_id} 승인: 주문 #{order_id}가 '{resolution}' 상태로 변경되었습니다."
+
+                # C. ✨ 환불일 경우에만 Listing 재고 복원 (핵심) ✨
+                if resolution == '환불':
+                    cur.execute(
+                        "UPDATE Listing SET stock = stock + %s, status = '판매중' WHERE listing_id = %s",
+                        (quantity, listing_id)
+                    )
+                    message = f"분쟁 #{dispute_id} 승인: 주문 #{order_id}가 환불 처리되었으며, 재고 {quantity}개가 복원되었습니다."
+                else:
+                    # 교환일 경우 재고 복원 없이 Orderb 상태만 변경
+                    message = f"분쟁 #{dispute_id} 승인: 주문 #{order_id}가 '{resolution}' 상태로 변경되었습니다."
+
 
                 # TODO: [필수] 환불 시 Listing 재고 복원 또는 재고/재입고 처리 로직 추가 필요
 
-            elif resolution == '거절':
-                message = f"분쟁 #{dispute_id} 처리 완료: 관리자가 요청을 거절했습니다."
             else:
                 conn.rollback()
                 return jsonify({"error": "처리 완료 시 유효한 Resolution('환불', '교환', '거절')이 필요합니다."}), 400
