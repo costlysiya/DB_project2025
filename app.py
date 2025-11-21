@@ -170,8 +170,20 @@ def get_user_profile_data(user_id, role):
             cur.execute("SELECT address FROM BuyerProfile WHERE user_id = %s", (user_id,))
             user_profile['buyer_profile'] = dict(cur.fetchone()) if cur.rowcount > 0 else {}
         elif role in ['PrimarySeller', 'Reseller']:
-            cur.execute("SELECT store_name, grade FROM SellerProfile WHERE user_id = %s", (user_id,))
-            user_profile['seller_profile'] = dict(cur.fetchone()) if cur.rowcount > 0 else {}
+            #  SellerProfile에서 기본 정보 (상점 이름) 조회
+            cur.execute("SELECT store_name FROM SellerProfile WHERE user_id = %s", (user_id,))
+            seller_profile = dict(cur.fetchone()) if cur.rowcount > 0 else {}
+            # SellerEvaluation에서 등급 및 점수 조회
+            cur.execute("SELECT grade, avg_score FROM SellerEvaluation WHERE seller_id = %s", (user_id,))
+            evaluation_data = cur.fetchone()
+            if evaluation_data:
+                # 평가 데이터가 있으면 프로필에 추가
+                seller_profile.update(dict(evaluation_data))
+            else:
+                # 평가 데이터가 없으면 기본값 설정 (Bronze/0.0)
+                seller_profile['grade'] = 'bronze'
+                seller_profile['avg_score'] = 0.0
+            user_profile['seller_profile'] = seller_profile
         else:  # Administrator
             user_profile['admin_profile'] = {}  # 관리자는 특별 프로필 정보 없음
 
@@ -504,7 +516,8 @@ def get_all_feedback_for_admin():
                     FROM feedback F, orderb O, Users U
                     WHERE O.feedback_submitted = true 
                         and F.order_id=O.order_id
-                    	and F.target_seller_id=U.user_id;
+                    	and F.target_seller_id=U.user_id
+                    ORDER BY F.is_checked ASC; 
                     """)
         feedbacks = [dict(row) for row in cur.fetchall()]
 

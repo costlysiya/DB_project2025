@@ -14,7 +14,7 @@
                 현재 배송 주소: {{ user_profile.buyer_profile.address | default('주소 미등록') }}
             {% elif user_profile.user.role in ['PrimarySeller', 'Reseller'] %}
                 판매자 상점: {{ user_profile.seller_profile.store_name | default('미지정') }} |
-                판매자 등급: <span class="seller-grade-badge">{{ user_profile.seller_profile.grade | default('Bronze', true) }}</span>
+                판매자 등급: <span class="seller-grade-badge">{{ user_profile.seller_profile.grade}}</span>
             {% endif %}
         </p>
     </div>
@@ -983,6 +983,13 @@
                         alert("코멘트를 입력해주세요.");
                         return;
                     }
+
+                    const feedbackData = {
+                        order_id: order_id,
+                        target_seller_id: target_seller_id,
+                        rating: rating,
+                        comment: comment
+                    };
 
                     try {
                         // 3. Flask API 호출
