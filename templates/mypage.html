@@ -358,6 +358,9 @@
                             {% for order in finished_orders %}
                             {% set is_completed = order.feedback_submitted %}
                             {% set disabled_attr = 'disabled' if is_completed else '' %}
+
+                            {% set current_rating = order.feedback_rating | default(5) %}
+                            {% set current_comment = order.feedback_comment | default('') %}
                             <tr>
                                 <td>
                                     <a href="{{ url_for('show_product_detail', listing_id=order.listing_id) }}">
@@ -369,11 +372,11 @@
                                 <td>{{ order.order_date.strftime('%Y-%m-%d %H:%M') }}</td>
                                 <td>
                                     <select class="form-control feedback-select" {{ disabled_attr }} >
-                                        <option value= 5 > 5 </option>
-                                        <option value= 4 > 4 </option>
-                                        <option value= 3 > 3 </option>
-                                        <option value= 2 > 2 </option>
-                                        <option value= 1 > 1 </option>
+                                        {% for option_value in [5, 4, 3, 2, 1] %}
+                                            <option value="{{ option_value }}" {% if current_rating == option_value %}selected{% endif %}>
+                                                {{ option_value }}
+                                            </option>
+                                        {% endfor %}
                                     </select>
                                 </td>
                                 <td>
@@ -381,6 +384,7 @@
                                         type="text"
                                         class="form-control feedback-comment-input"
                                         placeholder="후기를 입력하세요. (필수)"
+                                        value="{{current_comment}}"
                                         {{ disabled_attr }}
                                     >
                                 </td>

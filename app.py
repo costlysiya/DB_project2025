@@ -270,20 +270,30 @@ def get_orders_for_buyer(user_id, order_status):
 
         elif order_status == 'finished_order':
             cur.execute("""
-                        SELECT O.order_id,
+                               SELECT 
+                               O.order_id,
                                O.order_date,
-                               O.feedback_submitted,
                                V.product_name,
                                V.seller_name,
                                V.seller_id,
                                V.image_url,
-                               V.listing_id
-                        FROM orderb O,
-                             v_all_products V
+                               V.listing_id,
+                               
+                               -- 후기 정보 추가
+                               F.rating AS feedback_rating,
+                               F.comment AS feedback_comment,
+                               
+                               -- 후기 제출 여부 플래그: Feedback 행이 있으면 TRUE
+                               CASE WHEN F.feedback_id IS NOT NULL THEN TRUE ELSE FALSE END AS feedback_submitted
+                               
+                        FROM orderb O
+                        JOIN v_all_products V ON O.listing_id = V.listing_id
+                        LEFT JOIN Feedback F ON O.order_id = F.order_id -- 🚨 LEFT JOIN으로 수정
+                        
                         WHERE O.buyer_id = %s
-                          and O.listing_id = V.listing_id
-                          and O.status = '배송 완료'
-                        ORDER BY O.feedback_submitted ASC,
+                          AND O.status = '구매 확정'
+                          
+                        ORDER BY feedback_submitted ASC,
                             O.order_date DESC;
                         """, (user_id,))
         orders = [dict(row) for row in cur.fetchall()]
@@ -565,6 +575,13 @@ def update_seller_evaluation(cur, conn, seller_id):
         WHERE seller_id = %s
     """, (avg_score, grade, seller_id,))
 
+    #sellerprofile에도 등급 수정
+    cur.execute("""
+                UPDATE SellerProfile
+                SET grade = %s
+                WHERE user_id = %s
+                """, (grade, seller_id,))
+
     # 3-2. 갱신된 행이 없으면 새로 삽입 (처음 평가를 받는 판매자일 경우)
     if cur.rowcount == 0:
         cur.execute("""
@@ -646,10 +663,11 @@ def show_product_detail(listing_id):
                    P.image_url,
                    U.name   AS seller_name,
                    SP.store_name,
-                   SP.grade AS seller_grade
+                   SE.grade AS seller_grade
             FROM Listing L
                      JOIN Product P ON L.product_id = P.product_id
                      JOIN SellerProfile SP ON L.seller_id = SP.user_id
+                     JOIN SellerEvaluation SE ON L.seller_id = SP.user_id
                      JOIN Users U ON SP.user_id = U.user_id
             WHERE L.listing_id = %s
             """,
@@ -2176,6 +2194,10 @@ def update_dispute_status():
             return jsonify({"error": "존재하지 않는 분쟁 ID입니다."}), 404
 
         order_id = dispute_info['order_id']
+        dispute_issue_type = dispute_info['issue_type']  # 요청된 분쟁 유형 ('환불' 또는 '교환')
+
+        cur.execute("SELECT status FROM Orderb WHERE order_id = %s", (order_id,))
+        order_status = cur.fetchone()[0]
 
         # 2. Dispute 테이블 상태 업데이트
         cur.execute(
@@ -2238,10 +2260,9 @@ def update_dispute_status():
                     # 교환일 경우 재고 복원 없이 Orderb 상태만 변경
                     message = f"분쟁 #{dispute_id} 승인: 주문 #{order_id}가 '{resolution}' 상태로 변경되었습니다."
 
+
                 # TODO: [필수] 환불 시 Listing 재고 복원 또는 재고/재입고 처리 로직 추가 필요
 
-            elif resolution == '거절':
-                message = f"분쟁 #{dispute_id} 처리 완료: 관리자가 요청을 거절했습니다."
             else:
                 conn.rollback()
                 return jsonify({"error": "처리 완료 시 유효한 Resolution('환불', '교환', '거절')이 필요합니다."}), 400
