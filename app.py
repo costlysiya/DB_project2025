@@ -266,20 +266,30 @@ def get_orders_for_buyer(user_id, order_status):
 
         elif order_status == 'finished_order':
             cur.execute("""
-                        SELECT O.order_id,
+                        SELECT 
+                               O.order_id,
                                O.order_date,
-                               O.feedback_submitted,
                                V.product_name,
                                V.seller_name,
                                V.seller_id,
                                V.image_url,
-                               V.listing_id
-                        FROM orderb O,
-                             v_all_products V
+                               V.listing_id,
+                               
+                               -- 후기 정보 추가
+                               F.rating AS feedback_rating,
+                               F.comment AS feedback_comment,
+                               
+                               -- 후기 제출 여부 플래그: Feedback 행이 있으면 TRUE
+                               CASE WHEN F.feedback_id IS NOT NULL THEN TRUE ELSE FALSE END AS feedback_submitted
+                               
+                        FROM orderb O
+                        JOIN v_all_products V ON O.listing_id = V.listing_id
+                        LEFT JOIN Feedback F ON O.order_id = F.order_id -- 🚨 LEFT JOIN으로 수정
+                        
                         WHERE O.buyer_id = %s
-                          and O.listing_id = V.listing_id
-                          and O.status = '배송 완료'
-                        ORDER BY O.feedback_submitted ASC,
+                          AND O.status = '배송 완료'
+                          
+                        ORDER BY feedback_submitted ASC,
                             O.order_date DESC;
                         """, (user_id,))
         orders = [dict(row) for row in cur.fetchall()]
