@@ -256,8 +256,10 @@ footer p {
     font-size: 1.1em;
     font-weight: 600;
     margin-bottom: 5px;
-    height: 2.2em; /* 두 줄까지 표시 */
+    height: 2.8em; /* 두 줄까지 표시 */
     overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
 }
 
 .seller-info {

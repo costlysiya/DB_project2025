@@ -460,7 +460,7 @@ def get_disputes():
                              JOIN Product P ON L.product_id = P.product_id
                              JOIN Users BUYER ON O.buyer_id = BUYER.user_id
                              JOIN Users SELLER ON L.seller_id = SELLER.user_id
-                    ORDER BY D.dispute_id ASC;
+                    ORDER BY D.dispute_id DESC;
                     """)
         disputes = [dict(row) for row in cur.fetchall()]
 
@@ -546,48 +546,67 @@ def get_all_feedback_for_admin():
 
 #판매자 후기에 따른 등급 결정 함수 (admin)
 def update_seller_evaluation(cur, conn, seller_id):
-    # 1. is_checked=TRUE인 피드백만 사용하여 평균 점수 계산
-    # COALESCE(AVG(score), 0.0)를 사용하여 피드백이 하나도 없으면 0.0을 반환하도록 처리
-    cur.execute("""
-        SELECT COALESCE(AVG(rating), 0.0) 
-        FROM Feedback 
-        WHERE target_seller_id = %s AND is_checked = TRUE
-    """, (seller_id,))
+    """
+    피드백을 직접 집계하고 SellerEvaluation 및 SellerProfile에 반영합니다.
+    (새 등급 기준: 5점=Platinum, 4점=Gold, 3점=Silver, 나머지=Bronze)
+    """
 
-    # DB 결과는 Decimal 타입일 수 있으므로, 비교를 위해 float로 명시적 변환
-    avg_score = float(cur.fetchone()[0])
+    # 1. Feedback 테이블에서 최신 평가 정보 직접 집계
+    cur.execute(
+        """
+        SELECT 
+            COALESCE(AVG(rating), 0.0) AS calculated_avg_score,
+            COUNT(feedback_id) AS total_feedbacks
+        FROM 
+            Feedback F
+        WHERE 
+            F.target_seller_id = %s;
+        """,
+        (seller_id,)
+    )
+    summary = cur.fetchone()
 
-    # 2. 평균 점수를 기반으로 등급(grade) 결정
-    if avg_score == 5.0:
-        grade = 'platinum'
-    elif avg_score >= 4.0:
-        grade = 'gold'
-    elif avg_score >= 3.0:
-        grade = 'silver'
-    else:  # 3.0 미만 또는 피드백이 아예 없는 경우 (avg_score 0.0)
-        grade = 'bronze'
+    # 피드백이 없는 경우는 0으로 처리됨
+    avg_score = float(summary[0]) if summary and summary[0] is not None else 0.0
+    total_feedbacks = summary[1] if summary and summary[1] is not None else 0
 
-    # 3. SellerEvaluation 테이블 갱신 (UPSERT 로직)
-    # 3-1. 기존 행이 있으면 업데이트
-    cur.execute("""
+    # 2. 평균 점수를 기반으로 등급(grade) 결정 (새 기준 적용)
+    if total_feedbacks == 0:
+        # 피드백이 0건인 경우, 초기값 (Bronze, 0.0)을 유지
+        final_grade = 'Bronze'
+        final_score = 0.0
+    elif avg_score == 5.0:
+        final_grade = 'Platinum'
+        final_score = avg_score
+    elif avg_score >= 4.0:  # 4.0 이상 ~ 5.0 미만
+        final_grade = 'Gold'
+        final_score = avg_score
+    elif avg_score >= 3.0:  # 3.0 이상 ~ 4.0 미만
+        final_grade = 'Silver'
+        final_score = avg_score
+    else:  # 3.0 미만
+        final_grade = 'Bronze'
+        final_score = avg_score
+
+    # 3. SellerEvaluation 테이블 갱신 (UPDATE만 수행)
+    cur.execute(
+        """
         UPDATE SellerEvaluation
         SET avg_score = %s, grade = %s
         WHERE seller_id = %s
-    """, (avg_score, grade, seller_id,))
+        """,
+        (final_score, final_grade, seller_id)
+    )
 
-    #sellerprofile에도 등급 수정
-    cur.execute("""
-                UPDATE SellerProfile
-                SET grade = %s
-                WHERE user_id = %s
-                """, (grade, seller_id,))
-
-    # 3-2. 갱신된 행이 없으면 새로 삽입 (처음 평가를 받는 판매자일 경우)
-    if cur.rowcount == 0:
-        cur.execute("""
-            INSERT INTO SellerEvaluation (seller_id, avg_score, grade)
-            VALUES (%s, %s, %s)
-        """, (seller_id, avg_score, grade,))
+    # 4. SellerProfile에도 등급 수정 (SellerEvaluation의 확정 등급을 반영)
+    cur.execute(
+        """
+        UPDATE SellerProfile
+        SET grade = %s
+        WHERE user_id = %s
+        """,
+        (final_grade, seller_id,)
+    )
     #update_seller_evaluation 함수 내에서는 commit을 수행하지 않고, 트랜잭션의 최종 commit은 api_admin_seller_eval에서 한 번만 처리함.
 
 # 페이지 렌더링 라우터 (HTML)
@@ -663,11 +682,10 @@ def show_product_detail(listing_id):
                    P.image_url,
                    U.name   AS seller_name,
                    SP.store_name,
-                   SE.grade AS seller_grade
+                   SP.grade AS seller_grade
             FROM Listing L
                      JOIN Product P ON L.product_id = P.product_id
                      JOIN SellerProfile SP ON L.seller_id = SP.user_id
-                     JOIN SellerEvaluation SE ON L.seller_id = SP.user_id
                      JOIN Users U ON SP.user_id = U.user_id
             WHERE L.listing_id = %s
             """,
@@ -1082,8 +1100,10 @@ def signup_user():
         if role == 'Administrator':
             cur.execute("INSERT INTO AdminProfile (user_id) VALUES (%s)", (user_id,))
         elif role in ['PrimarySeller', 'Reseller']:
-            cur.execute("INSERT INTO SellerProfile (user_id, store_name, grade) VALUES (%s, %s, NULL)",
+            cur.execute("INSERT INTO SellerProfile (user_id, store_name, grade) VALUES (%s, %s, 'Bronze')",
                         (user_id, store_name))
+            cur.execute("INSERT INTO SellerEvaluation (seller_id, avg_score, grade) VALUES (%s, 0.0, 'Bronze')",
+                        (user_id,))
         elif role == 'Buyer':
             if not address:
                 conn.rollback()
@@ -2243,10 +2263,16 @@ def update_dispute_status():
 
                 listing_id = order_details['listing_id']
                 quantity = order_details['quantity']
+                # ✨ B. Orderb 상태 변경 (환불은 '환불' 유지, 교환은 '배송 완료'로 복구) ✨
+                final_order_status = resolution  # 기본값은 '환불' 또는 '교환'
+
+                if resolution == '교환':
+                    # 교환이 완료되었으므로, 새 상품이 나간다는 의미에서 '배송 완료'로 상태 복구
+                    final_order_status = '배송 완료'
 
                 cur.execute(
                     "UPDATE Orderb SET status = %s WHERE order_id = %s",
-                    (resolution, order_id)  # Orderb 상태를 '환불' 또는 '교환'으로 변경
+                    (final_order_status, order_id)
                 )
 
                 # C. ✨ 환불일 경우에만 Listing 재고 복원 (핵심) ✨
@@ -2258,7 +2284,7 @@ def update_dispute_status():
                     message = f"분쟁 #{dispute_id} 승인: 주문 #{order_id}가 환불 처리되었으며, 재고 {quantity}개가 복원되었습니다."
                 else:
                     # 교환일 경우 재고 복원 없이 Orderb 상태만 변경
-                    message = f"분쟁 #{dispute_id} 승인: 주문 #{order_id}가 '{resolution}' 상태로 변경되었습니다."
+                    message = f"분쟁 #{dispute_id} 승인: 주문 #{order_id}의 교환 처리가 완료되어 주문 상태가 '{final_order_status}'로 변경되었습니다."
 
 
                 # TODO: [필수] 환불 시 Listing 재고 복원 또는 재고/재입고 처리 로직 추가 필요

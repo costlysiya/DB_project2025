@@ -65,7 +65,7 @@
                     {% endif %}
                 </h4>
                 <!-- 판매자 정보 -->
-                <p class="seller-info">{{ product.seller_name }} ({{ product.seller_grade | default('N/A', true) }})</p>
+                <p class="seller-info">{{ product.seller_name }} ({{ product.seller_grade | default('bronze', true) }})</p>
                 <!-- 가격 (경매/일반 판매 분기) -->
                 {% if product.listing_status in ['경매 중', '경매 예정'] %}
                     <p class="product-price auction-price">현재가: {{ "{:,.0f}원".format(product.current_price or product.price) }}</p>
@@ -84,7 +84,7 @@
                     <span class="status-tag">⏳ 경매 예정</span>
                 {% elif product.listing_type == 'Resale' and product.condition %}
                     <span class="product-condition">상태: {{ product.condition }}</span>
-                {% elif product.product_rating %}
+                {% elif product.rating %}
                     <span class="product-rating">등급: {{ product.product_rating }}</span>
                 {% endif %}
 

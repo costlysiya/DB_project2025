@@ -56,7 +56,7 @@
                 <span class="seller-name">
                     {{ seller.store_name if seller.store_name else seller.seller_name }}
                 </span>
-                <span class="seller-grade">등급: {{ seller.seller_grade | default('N/A', true) }} </span>
+                <span class="seller-grade">등급: {{ seller.seller_grade | default('bronze', true) }} </span>
             </div>
 
             <div class="detail-section">
