@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>DB Role 보안 테스트</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container { max-width: 600px; margin: 0 auto; background: #f9f9f9; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h3 { color: #dc3545; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; font-weight: bold; margin-bottom: 5px; }
+        .form-group input, .form-group select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; }
+        #result { margin-top: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; white-space: pre-wrap; background-color: #fff; }
+        .success { color: green; font-weight: bold; }
+        .failure { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>DB Role 기반 접근 제어 테스트</h2>
+        <p>로그인 시 얻은 ID와 Role을 입력하고, DB 권한이 차단되는지 확인합니다. (Buyer Role은 Users 테이블 SELECT 시 실패해야 정상입니다.)</p>
+
+        <form id="roleTestForm">
+            <div class="form-group">
+                <label for="user_id">User ID (DB에 등록된 ID)</label>
+                <input type="number" id="user_id" value="4" required>
+            </div>
+
+            <div class="form-group">
+                <label for="user_role">User Role</label>
+                <select id="user_role" required>
+                    <option value="Buyer">Buyer (차단 예상)</option>
+                    <option value="PrimarySeller">PrimarySeller (차단 예상)</option>
+                    <option value="Administrator">Administrator (성공 예상)</option>
+                </select>
+            </div>
+
+            <button type="submit">테스트 실행 (POST /api/test_role)</button>
+        </form>
+
+        <div id="result">
+            결과를 기다리는 중...
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('roleTestForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            const userId = parseInt(document.getElementById('user_id').value);
+            const userRole = document.getElementById('user_role').value;
+            const resultDiv = document.getElementById('result');
+
+            resultDiv.innerHTML = '<span style="color: blue;">요청 전송 중...</span>';
+
+            const testData = {
+                user_id: userId,
+                user_role: userRole
+            };
+
+            try {
+                // Flask API 호출
+                const response = await fetch('/api/test_role', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(testData)
+                });
+
+                const result = await response.json();
+
+                // 400 또는 500 오류가 났더라도, JSON을 받았으므로 result.status를 확인
+                if (result.status === "SUCCESS - DB 차단 확인") {
+                    resultDiv.innerHTML = `<p class="success">✅ 테스트 성공: ${userRole}의 Users 테이블 접근이 DB에 의해 거부되었습니다.</p>
+                                            <p>이것은 **SET ROLE**이 성공적으로 작동하여 ${userRole}에 할당된 최소 권한만 남았음을 의미합니다.</p>`;
+                } else if (userRole === "Administrator" && result.status === undefined) {
+                    resultDiv.innerHTML = `<p class="success">✅ 관리자 테스트 성공: Administrator는 Users SELECT 권한이 있으므로 쿼리가 성공해야 합니다.</p>`;
+                } else {
+                    resultDiv.innerHTML = `<p class="failure">❌ 테스트 실패: 예상치 못한 오류가 발생했거나, DB 차단이 작동하지 않았습니다.</p>
+                                           <p>서버 응답: ${JSON.stringify(result, null, 2)}</p>`;
+                }
+
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="failure">❌ 네트워크 오류 또는 서버 응답 실패:</p><p>${error.message}</p>`;
+            }
+        });
+    </script>
+</body>
+</html>
