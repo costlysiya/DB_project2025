@@ -558,35 +558,42 @@ def update_seller_evaluation(cur, conn, seller_id):
             COALESCE(AVG(rating), 0.0) AS calculated_avg_score,
             COUNT(feedback_id) AS total_feedbacks
         FROM 
-            Feedback F
+            Feedback
         WHERE 
-            F.target_seller_id = %s;
+            target_seller_id = %s
+        GROUP BY
+            target_seller_id
+        HAVING 
+            COUNT(feedback_id) >= 3; -- ✨ 최소 3건 이상의 피드백을 받은 그룹만 필터링 ✨
         """,
         (seller_id,)
     )
     summary = cur.fetchone()
 
-    # 피드백이 없는 경우는 0으로 처리됨
-    avg_score = float(summary[0]) if summary and summary[0] is not None else 0.0
-    total_feedbacks = summary[1] if summary and summary[1] is not None else 0
+    # 2. 결과 해석 및 등급 결정
+    # HAVING 절을 통과하지 못하면 summary는 None이 됩니다.
+
+    if summary:
+        avg_score = float(summary['calculated_avg_score'])
+        total_feedbacks = summary['total_feedbacks']
+    else:
+        # 5건 미만이거나 피드백이 아예 없는 경우
+        avg_score = 0.0
+        total_feedbacks = 0
+
+    final_score = avg_score
 
     # 2. 평균 점수를 기반으로 등급(grade) 결정 (새 기준 적용)
-    if total_feedbacks == 0:
-        # 피드백이 0건인 경우, 초기값 (Bronze, 0.0)을 유지
+    if total_feedbacks < 3:  # 3건 미만인 경우
         final_grade = 'Bronze'
-        final_score = 0.0
     elif avg_score == 5.0:
         final_grade = 'Platinum'
-        final_score = avg_score
-    elif avg_score >= 4.0:  # 4.0 이상 ~ 5.0 미만
+    elif avg_score >= 4.0:
         final_grade = 'Gold'
-        final_score = avg_score
-    elif avg_score >= 3.0:  # 3.0 이상 ~ 4.0 미만
+    elif avg_score >= 3.0:
         final_grade = 'Silver'
-        final_score = avg_score
-    else:  # 3.0 미만
+    else:  # 3.0 미만 (하지만 3건 이상인 경우)
         final_grade = 'Bronze'
-        final_score = avg_score
 
     # 3. SellerEvaluation 테이블 갱신 (UPDATE만 수행)
     cur.execute(
@@ -2482,7 +2489,7 @@ def api_admin_seller_eval():
         return jsonify({"error": "DB 연결 실패"}), 500
 
     conn.autocommit = False
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     try:
         # 2. 피드백 유효성 확인 및 현재 상태 조회
