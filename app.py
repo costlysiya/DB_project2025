@@ -14,9 +14,19 @@ app.secret_key = os.urandom(24)
 # --- 임시 관리자 인증 번호 ---
 ADMIN_AUTH_CODE = "ADMIN4567"
 
+# PostgreSQL Role 이름 매핑 함수 생성
+def map_role_to_db_role(app_role):
+    role_map = {
+        'Buyer': 'buyer_role',
+        'PrimarySeller': 'primary_seller_role',
+        'Reseller': 'reseller_role',
+        'Administrator': 'administrator_role',
+        'SystemDeveloper': 'system_developer_role'
+    }
+    return role_map.get(app_role, None)
 
 #  DB 접속 설정 함수
-def get_db_connection():
+def get_db_connection(role=None):
     try:
         conn = psycopg2.connect(
             host="127.0.0.1",
@@ -25,8 +35,17 @@ def get_db_connection():
             password="db!2025",
             port="5432",
             client_encoding='UTF8'
-
         )
+        # (★신규) 역할(Role)이 전달되면 즉시 권한 설정
+        if role:
+            cur = conn.cursor()
+            #cur.execute("SELECT set_app_role(%s)", (role,))
+            cur.execute(f"SET ROLE {role}")
+            cur.close()
+            conn.commit()
+
+            print(f"DB 연결: Role '{role}' 권한으로 설정됨")
+
         return conn
     except Exception as e:
         print(f"DB 연결 오류: {e}")
@@ -78,8 +97,8 @@ app.jinja_env.filters['number_format'] = format_number
 
 
 # DB에서 상품을 조회하는 공통 함수
-def get_products_from_db(category=None, search_term=None, auction_only=False, sort_by='latest'):
-    conn = get_db_connection()
+def get_products_from_db(role=None, category=None, search_term=None, auction_only=False, sort_by='latest'):
+    conn = get_db_connection(role=role)
     if conn is None:
         return [], 0
 
@@ -150,7 +169,7 @@ def get_products_from_db(category=None, search_term=None, auction_only=False, so
 
 # 사용자 정보 가져오는 함수
 def get_user_profile_data(user_id, role):
-    conn = get_db_connection()
+    conn = get_db_connection(role=map_role_to_db_role(role))
     if conn is None:
         return None
 
@@ -158,34 +177,31 @@ def get_user_profile_data(user_id, role):
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     try:
-        # 1. Users 테이블에서 이름 조회 (세션에 이름이 없는 경우 대비)
         cur.execute("SELECT name, role FROM Users WHERE user_id = %s", (user_id,))
         user_data = cur.fetchone()
         if user_data:
             user_profile['user']['name'] = user_data['name']
             user_profile['user']['role'] = user_data['role']  # 혹시 세션과 다를 경우 갱신
 
-        # 2. 역할별 상세 프로필 조회
         if role == 'Buyer':
             cur.execute("SELECT address FROM BuyerProfile WHERE user_id = %s", (user_id,))
             user_profile['buyer_profile'] = dict(cur.fetchone()) if cur.rowcount > 0 else {}
         elif role in ['PrimarySeller', 'Reseller']:
-            #  SellerProfile에서 기본 정보 (상점 이름) 조회
             cur.execute("SELECT store_name FROM SellerProfile WHERE user_id = %s", (user_id,))
             seller_profile = dict(cur.fetchone()) if cur.rowcount > 0 else {}
             # SellerEvaluation에서 등급 및 점수 조회
             cur.execute("SELECT grade, avg_score FROM SellerEvaluation WHERE seller_id = %s", (user_id,))
             evaluation_data = cur.fetchone()
+            # 조회된 데이터 통합
             if evaluation_data:
                 # 평가 데이터가 있으면 프로필에 추가
                 seller_profile.update(dict(evaluation_data))
             else:
-                # 평가 데이터가 없으면 기본값 설정 (Bronze/0.0)
-                seller_profile['grade'] = 'bronze'
+                seller_profile['grade'] = 'Bronze'
                 seller_profile['avg_score'] = 0.0
             user_profile['seller_profile'] = seller_profile
         else:  # Administrator
-            user_profile['admin_profile'] = {}  # 관리자는 특별 프로필 정보 없음
+            user_profile['admin_profile'] = {}
 
         cur.close()
         conn.close()
@@ -194,14 +210,14 @@ def get_user_profile_data(user_id, role):
     except Exception as e:
         if conn:
             conn.close()
-        print(f"마이페이지 프로필 조회 중 오류 발생: {str(e)}")
+        print(f"프로필 조회 중 오류 발생 : {str(e)}")
         return None
 
 
 
 #관리자용 상품 목록 조회
-def get_products_for_admin_rating():
-    conn = get_db_connection()
+def get_products_for_admin_rating(role=None):
+    conn = get_db_connection(role=role)
     if conn is None:
         return jsonify({"error": "DB 연결 실패"}), 500
     try:
@@ -239,8 +255,8 @@ def get_products_for_admin_rating():
         return jsonify({"error": f"상품 목록 조회 오류: {str(e)}"}), 500
 
 # 주문 목록 조회 함수 (구매자 전용)
-def get_orders_for_buyer(user_id, order_status):
-    conn = get_db_connection()
+def get_orders_for_buyer(user_id, order_status, role=None):
+    conn = get_db_connection(role=role)
     if conn is None:
         return [], 0
     orders = []
@@ -257,9 +273,8 @@ def get_orders_for_buyer(user_id, order_status):
                            V.seller_name,
                            V.image_url,
                            V.listing_id,
-                            -- ✨ 해당 주문의 최근 분쟁 정보를 조회합니다. (LEFT JOIN 사용) ✨
-                            D.status AS dispute_status,
-                            D.issue_type
+                           D.status AS dispute_status,
+                           D.issue_type
                     FROM orderb O
                     JOIN v_all_products V ON O.listing_id = V.listing_id
                     LEFT JOIN Dispute D ON O.order_id = D.order_id
@@ -308,8 +323,8 @@ def get_orders_for_buyer(user_id, order_status):
 
 
 # ---  판매자 주문/판매 내역 조회 함수 (Seller 전용) ---
-def get_sales_for_seller(user_id):
-    conn = get_db_connection()
+def get_sales_for_seller(user_id, role=None):
+    conn = get_db_connection(role=role)
     if conn is None:
         return []
 
@@ -352,8 +367,8 @@ def get_sales_for_seller(user_id):
         return []
 
 #판매자 본인 등록 상품 조회 함수
-def get_my_products_list(user_id):
-    conn = get_db_connection()
+def get_my_products_list(user_id, role=None):
+    conn = get_db_connection(role=role)
     if conn is None:
         return []
 
@@ -387,12 +402,12 @@ def get_my_products_list(user_id):
 
 
 # 장바구니 수량 계산 함수
-def calculate_cart_count(user_id):
+def calculate_cart_count(user_id, role=None):
     """ 현재 사용자의 장바구니에 담긴 총 상품 개수를 계산합니다. """
     if not user_id:
         return 0
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=role)
     if conn is None:
         return 0
 
@@ -414,27 +429,30 @@ def calculate_cart_count(user_id):
             conn.close()
 
 
-# 2. 모든 요청 전에 실행되는 함수 등록 (Flask의 before_request 사용)
-@app.before_request
-def load_user_data_to_session():
-    # 사용자 ID가 세션에 있을 경우에만 실행
-    if 'user_id' in session and session['user_role'] == 'Buyer':
-        # 장바구니 수량을 계산하여 세션에 저장
-        session['cart_count'] = calculate_cart_count(session['user_id'])
-    else:
-        # 비구매자 또는 비로그인 상태는 0으로 초기화
-        session['cart_count'] = 0
-
-    # Jinja2 템플릿에서 session 객체에 직접 접근하도록 설정
-    # (이미 되어 있을 가능성이 높지만, 명시적으로 해줍니다.)
-    from flask import g
-    g.session = session  # 모든 템플릿에서 session을 사용할 수 있도록 보장 (선택적)
+# # 2. 모든 요청 전에 실행되는 함수 등록 (Flask의 before_request 사용)
+# @app.before_request
+# def load_user_data_to_session():
+#     user_id = session.get('user_id')
+#     user_role = session.get('user_role')
+#     db_role = map_role_to_db_role(user_role)
+#     # 사용자 ID가 세션에 있을 경우에만 실행
+#     if 'user_id' in session and session['user_role'] == 'Buyer':
+#         # 장바구니 수량을 계산하여 세션에 저장
+#         session['cart_count'] = calculate_cart_count(user_id, role=db_role)
+#     else:
+#         # 비구매자 또는 비로그인 상태는 0으로 초기화
+#         session['cart_count'] = 0
+#
+#     # Jinja2 템플릿에서 session 객체에 직접 접근하도록 설정
+#     # (이미 되어 있을 가능성이 높지만, 명시적으로 해줍니다.)
+#     from flask import g
+#     g.session = session  # 모든 템플릿에서 session을 사용할 수 있도록 보장 (선택적)
 
 
 #관리자 분쟁 조정 함수
-def get_disputes():
+def get_disputes(role=None):
     """ 모든 분쟁 목록을 조회합니다 (관리자 전용). """
-    conn = get_db_connection()
+    conn = get_db_connection(role=role)
     if conn is None:
         return []
 
@@ -475,9 +493,8 @@ def get_disputes():
             conn.close()
 
 
-def get_disputes_for_buyer(buyer_id):
-    """ 특정 구매자가 요청한 분쟁 목록을 조회합니다. """
-    conn = get_db_connection()
+def get_disputes_for_buyer(buyer_id, role=None):
+    conn = get_db_connection(role=role)
     if conn is None:
         return []
 
@@ -516,8 +533,8 @@ def get_disputes_for_buyer(buyer_id):
         return []
 
 #구매자가 등록한 모든 피드백 조회 함수 (관리자용)
-def get_all_feedback_for_admin():
-    conn = get_db_connection()
+def get_all_feedback_for_admin(role=None):
+    conn = get_db_connection(role=role)
     if conn is None:
         return []
 
@@ -546,11 +563,6 @@ def get_all_feedback_for_admin():
 
 #판매자 후기에 따른 등급 결정 함수 (admin)
 def update_seller_evaluation(cur, conn, seller_id):
-    """
-    피드백을 직접 집계하고 SellerEvaluation 및 SellerProfile에 반영합니다.
-    (새 등급 기준: 5점=Platinum, 4점=Gold, 3점=Silver, 나머지=Bronze)
-    """
-
     # 1. Feedback 테이블에서 최신 평가 정보 직접 집계
     cur.execute(
         """
@@ -615,10 +627,12 @@ def update_seller_evaluation(cur, conn, seller_id):
 @app.route('/')
 def show_main_page():
     # 정렬 기준 가져오기
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
     sort_by = request.args.get('sort_by', 'latest')
 
     # '전체 상품'을 조회
-    products, product_count = get_products_from_db(sort_by=sort_by)
+    products, product_count = get_products_from_db(role=db_role, sort_by=sort_by)
 
     return render_template(
         'index.html',
@@ -632,11 +646,14 @@ def show_main_page():
 # --- 카테고리별 상품 페이지 ---
 @app.route('/category/<category_name>')
 def show_category_page(category_name):
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
+
     # 정렬 기준 가져오기
     sort_by = request.args.get('sort_by', 'latest')
 
     # '카테고리'로 필터링하여 상품 조회
-    products, product_count = get_products_from_db(category=category_name, sort_by=sort_by)
+    products, product_count = get_products_from_db(role=db_role, category=category_name, sort_by=sort_by)
 
     return render_template(
         'index.html',
@@ -650,7 +667,10 @@ def show_category_page(category_name):
 # --- 상품 상세 페이지 ---
 @app.route('/product/<int:listing_id>')
 def show_product_detail(listing_id):
-    conn = get_db_connection()
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
+
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return render_template('product_detail.html', product=None, listing_id=listing_id)
 
@@ -658,7 +678,7 @@ def show_product_detail(listing_id):
     listing = None
     seller = None
     resale_images = []
-    auction = None  # ✨ 경매 변수 초기화 ✨
+    auction = None  # 경매 변수 초기화
     is_auction_ended = False  # 경매 완료 확인
 
     try:
@@ -726,7 +746,7 @@ def show_product_detail(listing_id):
                 )
                 resale_images = [dict(row) for row in cur.fetchall()]
 
-            # 3. ✨ 경매 상품일 경우 Auction 정보 조회 추가 ✨
+            # 3. 경매 상품일 경우 Auction 정보 조회 추가
             if data['status'] in ['경매 중', '경매 예정']:
                 cur.execute(
                     """
@@ -759,9 +779,22 @@ def show_product_detail(listing_id):
                     else:
                         auction['highest_bidder_name'] = None
 
-                    # ⚠️ 현재 시간이 마감 시간을 초과했는지 DB에서 확인합니다.
+                    # 현재 시간이 마감 시간을 초과했는지 DB에서 확인합니다.
                     cur.execute("SELECT NOW() AT TIME ZONE 'KST' > %s", (auction['end_date'],))
                     is_auction_ended = cur.fetchone()[0]
+
+                    # [신규 로직] 경매 시작 시간 확인
+                    cur.execute("SELECT NOW() AT TIME ZONE 'KST' > %s", (auction['start_date'],))
+                    is_auction_started = cur.fetchone()[0]
+
+                    if listing['status'] == '경매 예정' and is_auction_started and not is_auction_ended:
+                        cur.execute(
+                            "UPDATE Listing SET status = '경매 중' WHERE listing_id = %s",
+                            (listing_id,)
+                        )
+                        # DB 변경 후 상태를 즉시 반영
+                        listing['status'] = '경매 중'
+                        conn.commit()  # 상태 변경은 트랜잭션을 바로 커밋하여 반영
 
                     if is_auction_ended and listing['status'] != '판매 종료':
                         auction_id_for_finalize = auction['auction_id']
@@ -769,7 +802,7 @@ def show_product_detail(listing_id):
                         conn.close()
 
                         # DB 연결을 다시 엽니다. (새로운 트랜잭션 필요)
-                        conn_finalize = get_db_connection()
+                        conn_finalize = get_db_connection(role='administrator_role')
                         if conn_finalize:
                             cur_finalize = conn_finalize.cursor(cursor_factory=psycopg2.extras.DictCursor)
                             conn_finalize.autocommit = False
@@ -822,13 +855,12 @@ def show_product_detail(listing_id):
             listing=listing,
             seller=seller,
             resale_images=resale_images,
-            auction=auction,  # ✨ 조회한 auction 데이터를 템플릿에 전달합니다. ✨
+            auction=auction,
             is_auction_ended=is_auction_ended,
             listing_id=listing_id
         )
 
     except Exception as e:
-        # ... (오류 처리 유지) ...
         if conn:
             conn.close()
         print(f"상품 상세 조회 중 오류 발생: {str(e)}")
@@ -841,11 +873,13 @@ def show_shopping_cart():
     # 1. 로그인 확인 (장바구니는 로그인 필수)
     if 'user_id' not in session:
         return redirect(url_for('show_login_page'))
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
 
     buyer_id = session.get('user_id')
     cart_items = []
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return render_template('shopping_cart.html', cart_items=[], total_price=0, shipping_fee=0)
 
@@ -919,11 +953,13 @@ def show_shopping_cart():
 # --- 상품 검색 라우터 ---
 @app.route('/search')
 def search_products():
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
     search_query = request.args.get('query')
     sort_by = request.args.get('sort_by', 'latest')
 
     # '검색어'로 필터링하여 상품 조회
-    products, product_count = get_products_from_db(search_term=search_query, sort_by=sort_by)
+    products, product_count = get_products_from_db(role=db_role, search_term=search_query, sort_by=sort_by)
 
     return render_template(
         'index.html',
@@ -961,10 +997,12 @@ def show_product_register_page():
 # --- 경매/리셀 페이지 ---
 @app.route('/resale/auction')
 def show_auction_page():
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
     sort_by = request.args.get('sort_by', 'latest')
 
     # '경매 중' 또는 '경매 예정' 상품만 조회
-    products, product_count = get_products_from_db(auction_only=True, sort_by=sort_by)
+    products, product_count = get_products_from_db(role=db_role, auction_only=True, sort_by=sort_by)
 
     return render_template(
         'index.html',
@@ -994,6 +1032,7 @@ def show_mypage():
 
     user_id = session.get('user_id')
     user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
 
     # 쿼리 파라미터에서 현재 보여줄 뷰(view)를 가져옴 (기본값: summary)
     current_view = request.args.get('view', 'summary')
@@ -1019,32 +1058,32 @@ def show_mypage():
         "all_feedback": []
     }
     if current_view == 'orders' and user_role == 'Buyer':
-        template_data["orders"] = get_orders_for_buyer(user_id, 'all_status')
+        template_data["orders"] = get_orders_for_buyer(user_id, 'all_status', role=db_role)
     elif current_view == 'sales' and user_role in ['PrimarySeller', 'Reseller']:
-        template_data["sales_orders"] = get_sales_for_seller(user_id)
+        template_data["sales_orders"] = get_sales_for_seller(user_id, role=db_role)
     elif current_view == 'my_products' and user_role in ['PrimarySeller', 'Reseller']:
-        template_data["my_products"] = get_my_products_list(user_id)
+        template_data["my_products"] = get_my_products_list(user_id, role=db_role)
     elif current_view == 'disputes' and user_role == 'Buyer':
-        template_data["disputes"] = get_disputes_for_buyer(user_id)
+        template_data["disputes"] = get_disputes_for_buyer(user_id, role=db_role)
     elif current_view == 'admin_disputes' and user_role == 'Administrator': # ✨ 관리자 역할일 때만 모든 분쟁 목록을 조회합니다. ✨
-        template_data["admin_disputes"] = get_disputes()
+        template_data["admin_disputes"] = get_disputes(role=db_role)
     elif current_view == 'admin_rating' and user_role == 'Administrator':
-        template_data["products"] = get_products_for_admin_rating()
+        template_data["products"] = get_products_for_admin_rating(role=db_role)
     elif current_view == 'feedback' and user_role == 'Buyer':
-        template_data["finished_orders"] = get_orders_for_buyer(user_id, 'finished_order')
+        template_data["finished_orders"] = get_orders_for_buyer(user_id, 'finished_order',role=db_role)
     elif current_view == 'admin_seller_eval' and user_role == 'Administrator':
-        template_data["all_feedback"] = get_all_feedback_for_admin()
+        template_data["all_feedback"] = get_all_feedback_for_admin(role=db_role)
         # 5. 템플릿 렌더링
     return render_template('mypage.html', **template_data)
 
 #관리자 분쟁 조정 페이지
 @app.route('/admin/disputes', methods=['GET'])
 def show_admin_disputes():
-    # ⚠️ 관리자 권한 확인 (세션 user_role 확인)
     if session.get('user_role') != 'Administrator':
         return "관리자만 접근 가능합니다.", 403
-
-    disputes = get_disputes()
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
+    disputes = get_disputes(role=db_role)
 
     return render_template(
         'admin_disputes.html',
@@ -1057,6 +1096,7 @@ def show_admin_disputes():
 # ===============================================
 
 # --- 회원가입 API ---
+#signup은 Users 테이블에 INSERT해야 하므로, DBA 권한이 필요할 수 있음. role=None
 @app.route('/api/signup', methods=['POST'])
 def signup_user():
     data = request.json
@@ -1194,6 +1234,7 @@ def product_register():
 
     seller_id = session.get('user_id')
     seller_role = session.get('user_role')
+    db_role = map_role_to_db_role(seller_role)
 
     if seller_role not in ['PrimarySeller', 'Reseller']:
         return jsonify({"error": "상품 등록 권한이 없는 역할입니다."}), 403
@@ -1227,7 +1268,7 @@ def product_register():
         if is_auction and not all([auction_start_price, auction_start_date, auction_end_date]):
             return jsonify({"error": "경매 등록 시 시작가, 시작일, 종료일이 모두 필요합니다."}), 400
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
@@ -1235,7 +1276,6 @@ def product_register():
 
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
         cur.execute(
             "SELECT product_id FROM Product WHERE name = %s AND category = %s",
             (product_name, category)
@@ -1366,11 +1406,13 @@ def auction_bid():
 
     buyer_id = session.get('user_id')
     bid_price = data.get('bid_price')
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
 
     if not all([auction_id, bid_price]):
         return jsonify({"error": "경매ID와 입찰가가 모두 필요합니다."}), 400
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
@@ -1378,10 +1420,10 @@ def auction_bid():
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     try:
-        # 1. ✨ 상태, 가격, 시간, 판매자 ID 조회 (v_auction_status를 활용) ✨
+        # 1. 상태, 가격, 시간, 판매자 ID 조회 (v_auction_status를 활용)
         cur.execute(
             """
-            SELECT current_price, start_date, end_date, calculated_auction_status, seller_id
+            SELECT current_price, start_date, end_date, status, seller_id
             FROM v_auction_status
             WHERE auction_id = %s
                 FOR UPDATE
@@ -1428,13 +1470,7 @@ def auction_bid():
             conn.rollback()
             return jsonify({"error": f"입찰가는 현재 최고가({auction_info['current_price']})보다 높아야 합니다."}), 400
 
-        # 5. 입찰 기록 (AuctionBid) - 주석 처리된 부분 주석 해제 (AuctionBid 테이블이 있다면)
-        # cur.execute(
-        #     "INSERT INTO AuctionBid (auction_id, buyer_id, bid_price, bid_time) VALUES (%s, %s, %s, NOW())",
-        #     (auction_id, buyer_id, bid_price)
-        # )
-
-        # 6. 경매 정보 업데이트 (Auction)
+        # 5. 경매 정보 업데이트 (Auction)
         cur.execute(
             "UPDATE Auction SET current_price = %s, current_highest_bidder_id = %s WHERE auction_id = %s",
             (bid_price, buyer_id, auction_id)
@@ -1452,7 +1488,6 @@ def auction_bid():
 
 
 #  경매 종료 및 자동 주문 기능
-# TODO: 경매 종료 후 자동으로 orderb테이블에 추가되는거 어디에 연결?
 @app.route('/api/auction/finalize', methods=['POST'])
 def finalize_auction():
     data = request.json
@@ -1460,8 +1495,10 @@ def finalize_auction():
 
     if not auction_id:
         return jsonify({"error": "경매ID가 필요합니다."}), 400
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
@@ -1556,12 +1593,15 @@ def add_to_cart():
     listing_id = data.get('listing_id')
     quantity = data.get('quantity')
     buyer_id = session.get('user_id')
-    session['cart_count'] = calculate_cart_count(session['user_id'])
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
+
+    #session['cart_count'] = calculate_cart_count(buyer_id)
 
     if not all([listing_id, quantity]) or quantity <= 0:
         return jsonify({"error": "상품 ID와 유효한 수량이 필요합니다."}), 400
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
@@ -1609,6 +1649,7 @@ def add_to_cart():
             message = "장바구니에 새 상품이 담겼습니다."
 
         conn.commit()
+        session['cart_count'] = calculate_cart_count(buyer_id, role=db_role)
         return jsonify({"message": message}), 200
 
     except Exception as e:
@@ -1629,10 +1670,13 @@ def update_cart():
     cart_items = data.get('items')  # [{'cart_id': 1, 'quantity': 2}, ...]
     buyer_id = session.get('user_id')
 
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
+
     if not cart_items or not isinstance(cart_items, list):
         return jsonify({"error": "유효한 장바구니 항목 목록이 필요합니다."}), 400
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
@@ -1681,6 +1725,7 @@ def update_cart():
             )
 
         conn.commit()
+        session['cart_count'] = calculate_cart_count(buyer_id, role=db_role)
         return jsonify({"message": "선택 상품 수량이 성공적으로 업데이트되었습니다."}), 200
 
     except Exception as e:
@@ -1697,11 +1742,13 @@ def remove_cart_item():
     data = request.json
     cart_ids = data.get('cart_ids')  # [1, 5, 8]
     buyer_id = session.get('user_id')
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
 
     if not cart_ids or not isinstance(cart_ids, list):
         return jsonify({"error": "유효한 장바구니 ID 목록이 필요합니다."}), 400
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
@@ -1722,6 +1769,7 @@ def remove_cart_item():
 
         deleted_count = cur.rowcount
         conn.commit()
+        session['cart_count'] = calculate_cart_count(buyer_id, role=db_role)
 
         if deleted_count == 0:
             return jsonify({"message": "삭제할 항목을 찾을 수 없거나 소유권이 없습니다."}), 404
@@ -1745,11 +1793,13 @@ def place_order():
     data = request.json
     items_to_order = data.get('items')  # [{'listing_id': 1, 'quantity': 2}, ...]
     buyer_id = session.get('user_id')
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
 
     if not items_to_order or not isinstance(items_to_order, list):
         return jsonify({"error": "유효한 주문 항목 목록이 필요합니다."}), 400
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
@@ -1846,6 +1896,7 @@ def place_order():
 
         # 5. 모든 작업 커밋
         conn.commit()
+        session['cart_count'] = calculate_cart_count(buyer_id, role=db_role)
 
         return jsonify({
             "message": f"주문({','.join(map(str, order_ids))})이 성공적으로 접수되었습니다. 최종 결제 금액: {float(final_total):,.0f}원",
@@ -1870,11 +1921,13 @@ def update_order_status():
 
     data = request.json
     order_id = data.get('order_id')
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
 
     if not order_id:
         return jsonify({"error": "주문 ID가 필요합니다."}), 400
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
@@ -1945,6 +1998,7 @@ def api_update_profile():
     data = request.json
     user_id = session.get('user_id')
     role = session.get('user_role')
+    db_role = map_role_to_db_role(role)
 
     # 공통 정보
     new_name = data.get('name')
@@ -1954,7 +2008,7 @@ def api_update_profile():
     new_address = data.get('address')
     new_store_name = data.get('store_name')
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
@@ -2014,6 +2068,8 @@ def update_product_listing():
     stock = data.get('stock')
     status = data.get('listing_status')
     condition = data.get('condition')  # 2차 판매자만 사용 가능
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
 
     # 입력값 검증
     if not product_name or not product_name.strip():
@@ -2035,7 +2091,7 @@ def update_product_listing():
     except ValueError:
         return jsonify({"error": "가격과 재고는 유효한 숫자여야 합니다."}), 400
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 오류"}), 500
 
@@ -2114,6 +2170,8 @@ def create_dispute():
     order_id = data.get('order_id')
     issue_type = data.get('issue_type')  # '환불' 또는 '교환'
     reason = data.get('reason')  # 사유 (추가 입력값)
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
 
     if not all([order_id, issue_type, reason]):
         return jsonify({"error": "주문 ID, 유형, 사유가 모두 필요합니다."}), 400
@@ -2121,13 +2179,14 @@ def create_dispute():
     if issue_type not in ['환불', '교환']:
         return jsonify({"error": "유효하지 않은 분쟁 유형입니다."}), 400
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
     conn.autocommit = False
     cur = conn.cursor()
     buyer_id = session.get('user_id')
+    #TODO: 이부분 이상함 admin_id 열을 분쟁 처리 시작하면서 채우던가 해야할듯
     admin_id = 1  # 임시 관리자 ID (관리자 테이블에 1번으로 등록되어 있다고 가정)
 
     try:
@@ -2194,10 +2253,13 @@ def update_dispute_status():
     new_dispute_status = data.get('new_status')  # '처리 중', '처리 완료'
     resolution = data.get('resolution')  # '환불', '교환', '거절' (처리 완료 시)
 
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
+
     if not all([dispute_id, new_dispute_status]):
         return jsonify({"error": "분쟁 ID와 새로운 상태가 필요합니다."}), 400
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
@@ -2227,7 +2289,7 @@ def update_dispute_status():
 
         message = f"분쟁 #{dispute_id} 상태가 '{new_dispute_status}'로 업데이트되었습니다."
 
-        # 3. ✨ 처리 완료 (승인/거절) 로직 ✨
+        # 3. 처리 완료 (승인/거절) 로직
         if new_dispute_status == '처리 완료':
 
             if resolution == '거절':
@@ -2242,7 +2304,7 @@ def update_dispute_status():
 
                 # Dispute의 Issue_type과 Resolution이 일치하는지 확인 (선택적)
                 if resolution != dispute_issue_type:
-                    # ⚠️ 경고: 요청 유형과 승인 유형이 다름 (예: '환불' 요청인데 '교환 승인'을 누름)
+                    # 요청 유형과 승인 유형이 다름 (예: '환불' 요청인데 '교환 승인'을 누름)
                     conn.rollback()
                     return jsonify({
                         "error": "논리적 오류",
@@ -2250,7 +2312,6 @@ def update_dispute_status():
                     }), 400
 
                 # A. 주문 상세 정보 조회 (재고 복원을 위해 주문 수량과 listing_id 필요)
-                # Orderb 테이블은 Orderb.listing_id와 Orderb.quantity를 가지고 있습니다.
                 cur.execute(
                     "SELECT listing_id, quantity FROM Orderb WHERE order_id = %s",
                     (order_id,)
@@ -2263,7 +2324,7 @@ def update_dispute_status():
 
                 listing_id = order_details['listing_id']
                 quantity = order_details['quantity']
-                # ✨ B. Orderb 상태 변경 (환불은 '환불' 유지, 교환은 '배송 완료'로 복구) ✨
+                #  B. Orderb 상태 변경 (환불은 '환불' 유지, 교환은 '배송 완료'로 복구)
                 final_order_status = resolution  # 기본값은 '환불' 또는 '교환'
 
                 if resolution == '교환':
@@ -2275,7 +2336,7 @@ def update_dispute_status():
                     (final_order_status, order_id)
                 )
 
-                # C. ✨ 환불일 경우에만 Listing 재고 복원 (핵심) ✨
+                # C. 환불일 경우에만 Listing 재고 복원
                 if resolution == '환불':
                     cur.execute(
                         "UPDATE Listing SET stock = stock + %s, status = '판매중' WHERE listing_id = %s",
@@ -2285,9 +2346,6 @@ def update_dispute_status():
                 else:
                     # 교환일 경우 재고 복원 없이 Orderb 상태만 변경
                     message = f"분쟁 #{dispute_id} 승인: 주문 #{order_id}의 교환 처리가 완료되어 주문 상태가 '{final_order_status}'로 변경되었습니다."
-
-
-                # TODO: [필수] 환불 시 Listing 재고 복원 또는 재고/재입고 처리 로직 추가 필요
 
             else:
                 conn.rollback()
@@ -2315,11 +2373,13 @@ def confirm_purchase():
     data = request.json
     order_id = data.get('order_id')
     buyer_id = session.get('user_id')
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
 
     if not order_id:
         return jsonify({"error": "주문 ID가 필요합니다."}), 400
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
@@ -2343,7 +2403,7 @@ def confirm_purchase():
 
         current_status = order_info['status']
 
-        # ✨ NULL 값 또는 유효하지 않은 상태 명시적 처리 ✨
+        # NULL 값 또는 유효하지 않은 상태 명시적 처리
         if current_status is None:
             conn.rollback()
             return jsonify({"error": "DB 오류: 주문 상태가 NULL로 저장되어 있습니다."}), 500
@@ -2353,7 +2413,7 @@ def confirm_purchase():
             conn.rollback()
             return jsonify({"error": f"주문 상태 '{current_status}'는 확정할 수 없습니다. '배송 완료' 상태에서만 가능합니다."}), 400
         # 3. Orderb 상태를 '구매 확정'으로 변경
-        # (⚠️ DB의 order_status ENUM에 '구매 확정'이 추가되었다고 가정합니다.)
+        # ( DB의 order_status ENUM에 '구매 확정'이 추가되었다고 가정합니다.)
         cur.execute(
             "UPDATE Orderb SET status = '구매 확정' WHERE order_id = %s",
             (order_id,)
@@ -2382,11 +2442,13 @@ def update_product_by_admin():
     # 2. 데이터 추출
     product_id = data.get('product_id')
     rating = data.get('rating')
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
 
     if not product_id:
         return jsonify({"error": "상품 ID가 누락되었습니다."}), 400
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "데이터베이스 연결 실패"}), 500
 
@@ -2428,10 +2490,13 @@ def submit_feedback():
     rating = data.get('rating')
     comment = data.get('comment')
 
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
+
     if not all([order_id, target_seller_id, rating, comment is not None]):
         return jsonify({"error": "필수 입력 항목 (별점, 코멘트)이 누락되었습니다."}), 400
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "DB 연결 실패"}), 500
 
@@ -2471,13 +2536,17 @@ def api_admin_seller_eval():
     seller_id = data.get('seller_id')
     action = data.get('action')  # 'approve' (승인) 또는 'reject' (거절)
 
+    user_role = session.get('user_role')
+    db_role = map_role_to_db_role(user_role)
+
     if not all([feedback_id, order_id, seller_id, action]):
         return jsonify({"error": "필수 입력 항목이 누락되었습니다."}), 400
-
     if action not in ['approve', 'reject']:
         return jsonify({"error": "유효하지 않은 액션입니다."}), 400
+    if db_role != 'administrator_role':
+        return jsonify({"error": "관리자만 접근 가능합니다."}), 403
 
-    conn = get_db_connection()
+    conn = get_db_connection(role=db_role)
     if conn is None:
         return jsonify({"error": "DB 연결 실패"}), 500
 
