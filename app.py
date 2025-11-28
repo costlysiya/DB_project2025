@@ -177,16 +177,19 @@ def get_user_profile_data(user_id, role):
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     try:
+        # 1. Users 테이블에서 이름 조회 (세션에 이름이 없는 경우 대비)
         cur.execute("SELECT name, role FROM Users WHERE user_id = %s", (user_id,))
         user_data = cur.fetchone()
         if user_data:
             user_profile['user']['name'] = user_data['name']
             user_profile['user']['role'] = user_data['role']  # 혹시 세션과 다를 경우 갱신
 
+        # 2. 역할별 상세 프로필 조회
         if role == 'Buyer':
             cur.execute("SELECT address FROM BuyerProfile WHERE user_id = %s", (user_id,))
             user_profile['buyer_profile'] = dict(cur.fetchone()) if cur.rowcount > 0 else {}
         elif role in ['PrimarySeller', 'Reseller']:
+            #  SellerProfile에서 기본 정보 (상점 이름) 조회
             cur.execute("SELECT store_name FROM SellerProfile WHERE user_id = %s", (user_id,))
             seller_profile = dict(cur.fetchone()) if cur.rowcount > 0 else {}
             # SellerEvaluation에서 등급 및 점수 조회
@@ -570,35 +573,42 @@ def update_seller_evaluation(cur, conn, seller_id):
             COALESCE(AVG(rating), 0.0) AS calculated_avg_score,
             COUNT(feedback_id) AS total_feedbacks
         FROM 
-            Feedback F
+            Feedback
         WHERE 
-            F.target_seller_id = %s;
+            target_seller_id = %s
+        GROUP BY
+            target_seller_id
+        HAVING 
+            COUNT(feedback_id) >= 3; 
         """,
         (seller_id,)
     )
     summary = cur.fetchone()
 
-    # 피드백이 없는 경우는 0으로 처리됨
-    avg_score = float(summary[0]) if summary and summary[0] is not None else 0.0
-    total_feedbacks = summary[1] if summary and summary[1] is not None else 0
+    # 2. 결과 해석 및 등급 결정
+    # HAVING 절을 통과하지 못하면 summary는 None이 됩니다.
+
+    if summary:
+        avg_score = float(summary['calculated_avg_score'])
+        total_feedbacks = summary['total_feedbacks']
+    else:
+        # 5건 미만이거나 피드백이 아예 없는 경우
+        avg_score = 0.0
+        total_feedbacks = 0
+
+    final_score = avg_score
 
     # 2. 평균 점수를 기반으로 등급(grade) 결정 (새 기준 적용)
-    if total_feedbacks == 0:
-        # 피드백이 0건인 경우, 초기값 (Bronze, 0.0)을 유지
+    if total_feedbacks < 3:  # 3건 미만인 경우
         final_grade = 'Bronze'
-        final_score = 0.0
     elif avg_score == 5.0:
         final_grade = 'Platinum'
-        final_score = avg_score
-    elif avg_score >= 4.0:  # 4.0 이상 ~ 5.0 미만
+    elif avg_score >= 4.0:
         final_grade = 'Gold'
-        final_score = avg_score
-    elif avg_score >= 3.0:  # 3.0 이상 ~ 4.0 미만
+    elif avg_score >= 3.0:
         final_grade = 'Silver'
-        final_score = avg_score
-    else:  # 3.0 미만
+    else:  # 3.0 미만 (하지만 3건 이상인 경우)
         final_grade = 'Bronze'
-        final_score = avg_score
 
     # 3. SellerEvaluation 테이블 갱신 (UPDATE만 수행)
     cur.execute(
@@ -2186,10 +2196,16 @@ def create_dispute():
     conn.autocommit = False
     cur = conn.cursor()
     buyer_id = session.get('user_id')
-    #TODO: 이부분 이상함 admin_id 열을 분쟁 처리 시작하면서 채우던가 해야할듯
-    admin_id = 1  # 임시 관리자 ID (관리자 테이블에 1번으로 등록되어 있다고 가정)
 
     try:
+        # 0. 활성 관리자 목록 조회 및 할당
+        cur.execute("SELECT user_id FROM Users WHERE role = 'Administrator' ORDER BY user_id ASC")
+        admin_ids = [row[0] for row in cur.fetchall()]
+
+        if not admin_ids:
+            conn.rollback()
+            return jsonify({"error": "분쟁을 처리할 관리자 계정이 존재하지 않습니다."}), 500
+
         # 1. 주문의 소유권 및 상태 확인 (DB 트랜잭션 보호)
         cur.execute(
             "SELECT status FROM Orderb WHERE order_id = %s AND buyer_id = %s",
@@ -2217,10 +2233,10 @@ def create_dispute():
         # 3. Dispute 테이블에 요청 삽입
         cur.execute(
             """
-            INSERT INTO Dispute (order_id, admin_id, issue_type, status, reason)
-            VALUES (%s, %s, %s, '처리 전', %s) RETURNING dispute_id
+            INSERT INTO Dispute (order_id, issue_type, status, reason, admin_id)
+            VALUES (%s, %s, '처리 전', %s, NULL) RETURNING dispute_id
             """,
-            (order_id, admin_id, issue_type, reason)
+            (order_id, issue_type, reason)
         )
         dispute_id = cur.fetchone()[0]
 
@@ -2252,6 +2268,7 @@ def update_dispute_status():
     dispute_id = data.get('dispute_id')
     new_dispute_status = data.get('new_status')  # '처리 중', '처리 완료'
     resolution = data.get('resolution')  # '환불', '교환', '거절' (처리 완료 시)
+    admin_user_id = session.get('user_id') #현재 로그인된 관리자의 ID
 
     user_role = session.get('user_role')
     db_role = map_role_to_db_role(user_role)
@@ -2289,7 +2306,33 @@ def update_dispute_status():
 
         message = f"분쟁 #{dispute_id} 상태가 '{new_dispute_status}'로 업데이트되었습니다."
 
-        # 3. 처리 완료 (승인/거절) 로직
+        # 2. Dispute 테이블 상태 업데이트 (처리 중으로 변경 시 admin_id 할당)
+        if new_dispute_status == '처리 중':
+            # '처리 전' 상태에서만 admin_id를 할당합니다.
+            cur.execute("SELECT admin_id FROM Dispute WHERE dispute_id = %s FOR UPDATE", (dispute_id,))
+            current_admin_id = cur.fetchone()[0]
+
+            if current_admin_id is None:
+                # ⚠️ admin_id가 NULL일 경우에만 현재 로그인된 관리자를 할당
+                cur.execute(
+                    "UPDATE Dispute SET status = %s, admin_id = %s WHERE dispute_id = %s",
+                    (new_dispute_status, admin_user_id, dispute_id)
+                )
+                message = f"분쟁 #{dispute_id} 상태가 '{new_dispute_status}'로 업데이트되었으며, 관리자 #{admin_user_id}이 처리를 시작합니다."
+            else:
+                # 이미 다른 관리자에게 할당된 경우, 상태만 업데이트
+                cur.execute(
+                    "UPDATE Dispute SET status = %s WHERE dispute_id = %s",
+                    (new_dispute_status, dispute_id)
+                )
+        else:
+            # '처리 완료' 상태로 변경 시 (할당은 이미 되었으므로 상태만 변경)
+            cur.execute(
+                "UPDATE Dispute SET status = %s WHERE dispute_id = %s",
+                (new_dispute_status, dispute_id)
+            )
+
+        # 3. ✨ 처리 완료 (승인/거절) 로직 ✨
         if new_dispute_status == '처리 완료':
 
             if resolution == '거절':
