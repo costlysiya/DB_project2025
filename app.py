@@ -2313,7 +2313,7 @@ def update_dispute_status():
             current_admin_id = cur.fetchone()[0]
 
             if current_admin_id is None:
-                # ⚠️ admin_id가 NULL일 경우에만 현재 로그인된 관리자를 할당
+                # admin_id가 NULL일 경우에만 현재 로그인된 관리자를 할당
                 cur.execute(
                     "UPDATE Dispute SET status = %s, admin_id = %s WHERE dispute_id = %s",
                     (new_dispute_status, admin_user_id, dispute_id)
