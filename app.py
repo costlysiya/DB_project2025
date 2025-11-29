@@ -833,7 +833,7 @@ def show_product_detail(listing_id):
                 resale_images = [dict(row) for row in cur.fetchall()]
 
             # 3. 경매 상품일 경우 Auction 정보 조회 추가
-            if data['status'] in ['경매 중', '경매 예정']:
+            if data['status'] in ['경매 중', '경매 예정','판매 종료']:
                 cur.execute(
                     """
                     SELECT auction_id,
