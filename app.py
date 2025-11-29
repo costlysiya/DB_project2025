@@ -114,43 +114,46 @@ def get_products_from_db(role=None, category=None, search_term=None, auction_onl
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        sql_base_query = """
-                         SELECT L.listing_id, 
-                                L.listing_type, 
-                                L.price, 
-                                L.stock, 
-                                L.condition, 
-                                L.status,
-                                P.product_id, 
-                                P.name                              AS product_name, 
-                                P.category, 
-                                P.rating                            AS product_rating,
-                                COALESCE(LI.image_url, P.image_url) AS image_url,
-                                U.name                              AS seller_name, 
-                                SP.grade                            AS seller_grade,
-                                A.end_date, 
-                                A.auction_id,
+        # 1. 서브쿼리 정의 (상품 정보와 listing_status 계산)
+        sql_subquery = """
+            (SELECT L.listing_id, 
+                    L.listing_type, 
+                    L.price, 
+                    L.stock, 
+                    L.condition, 
+                    L.status,
+                    P.product_id, 
+                    P.name                              AS product_name, 
+                    P.category, 
+                    P.rating                            AS product_rating,
+                    COALESCE(LI.image_url, P.image_url) AS image_url,
+                    U.name                              AS seller_name, 
+                    SP.grade                            AS seller_grade,
+                    A.end_date, 
+                    A.auction_id,
 
-                                -- 최종 listing_status 계산 (경매 마감 여부 체크)
-                                CASE
-                                    WHEN L.listing_type = 'Resale' AND A.auction_id IS NOT NULL
-                                        AND NOW() AT TIME ZONE 'KST' > A.end_date THEN '판매 종료'
-                                    WHEN L.stock = 0 THEN '품절'
-                                    ELSE L.status
-                                    END AS listing_status                           
-                         FROM Listing L
-                                  JOIN Product P ON L.product_id = P.product_id
-                                  JOIN Users U ON L.seller_id = U.user_id
-                                  JOIN SellerProfile SP ON U.user_id = SP.user_id
-                                  LEFT JOIN Auction A ON L.listing_id = A.listing_id
-                                  LEFT JOIN ListingImage LI ON L.listing_id = LI.listing_id AND LI.is_main = TRUE 
-                         """
+                    -- 재계산된 listing_status를 서브쿼리 내에서 정의
+                    CASE
+                        WHEN L.listing_type = 'Resale' AND A.auction_id IS NOT NULL
+                            AND NOW() AT TIME ZONE 'KST' > A.end_date THEN '판매 종료'
+                        ELSE L.status
+                        END AS listing_status                           
+            FROM Listing L
+                     JOIN Product P ON L.product_id = P.product_id
+                     JOIN Users U ON L.seller_id = U.user_id
+                     JOIN SellerProfile SP ON U.user_id = SP.user_id
+                     LEFT JOIN Auction A ON L.listing_id = A.listing_id
+                     LEFT JOIN ListingImage LI ON L.listing_id = LI.listing_id AND LI.is_main = TRUE 
+            ) AS listed_products
+        """
 
-        sql_query = sql_base_query
+        # 2. 메인 쿼리 구성 시작
+        sql_query = "SELECT * FROM " + sql_subquery
+
         conditions = []
         params = []
 
-        # 2. 동적 WHERE 조건 추가 및 조합 (유지)
+        # 3. 동적 WHERE 조건 추가 (listed_products의 컬럼 사용)
         if category:
             conditions.append("category = %s")
             params.append(category)
@@ -158,36 +161,33 @@ def get_products_from_db(role=None, category=None, search_term=None, auction_onl
             conditions.append("product_name LIKE %s")
             params.append(f"%{search_term}%")
 
-        # 경매 전용 필터: L.status가 경매 중/예정이거나 L.status가 '판매 종료'인 경우를 포함합니다.
+        # 경매 전용 필터: listed_products의 listing_status를 사용하여 필터링
         if auction_only:
-            # 여기서 '판매 종료'는 경매 마감으로 인해 이미 업데이트된 상태를 포함합니다.
             conditions.append("listing_type = 'Resale' AND listing_status IN ('경매 중', '경매 예정', '판매 종료')")
 
         if conditions:
             sql_query += " WHERE " + " AND ".join(conditions)
 
+        # 4. 상태 우선순위: listed_products에서 확정된 listing_status 컬럼을 사용
         status_order_clause = """
-            CASE 
-                WHEN L.listing_type = 'Resale' AND A.auction_id IS NOT NULL 
-                     AND NOW() AT TIME ZONE 'KST' > A.end_date THEN 2   -- 판매 종료 (2)
-                WHEN L.stock = 0 THEN 1                                 -- 품절 (1)
-                ELSE 0                                                    -- 그 외 (0)
+            CASE listing_status
+                WHEN '판매 종료' THEN 2
+                WHEN '품절' THEN 1
+                ELSE 0
             END ASC
         """
 
-        #정렬 로직 추가: sort_by 값에 따라 ORDER BY 절을 동적으로 변경
+        # 정렬 로직 추가
         if sort_by == 'low_price':
-            main_order_clause = " L.price ASC"
+            main_order_clause = " price ASC"
         elif sort_by == 'high_price':
-            main_order_clause = " L.price DESC"
+            main_order_clause = " price DESC"
         elif sort_by == 'rating':
-            # 등급은 S, A, B 순이므로 DESC, NULLS LAST는 등급이 없는 상품을 뒤로 보냄
-            main_order_clause = " P.product_rating DESC NULLS LAST, L.listing_id DESC"
+            main_order_clause = " product_rating DESC NULLS LAST, listing_id DESC"
         else:
-            # 기본 정렬: 최신 등록순
-            main_order_clause = " L.listing_id DESC"
+            main_order_clause = " listing_id DESC"
 
-            # 3. 최종 ORDER BY 절 조합: 상태 우선순위 + 메인 기준 적용
+        # 5. 최종 ORDER BY 절 조합
         order_clause = f" ORDER BY {status_order_clause}, {main_order_clause}"
 
         sql_query += order_clause
@@ -195,7 +195,6 @@ def get_products_from_db(role=None, category=None, search_term=None, auction_onl
         cur.execute(sql_query, tuple(params))
         products_raw = cur.fetchall()
         products = [dict(product) for product in products_raw]
-
 
         cur.close()
         conn.close()
@@ -457,6 +456,17 @@ def get_my_products_list(user_id, role=None):
                 V.condition
             FROM listing L, v_all_products V  
             WHERE L.listing_id = V.listing_id and L.seller_id = %s
+            ORDER BY
+                -- 1순위: 상태 우선순위에 따른 정렬 (ASC이므로 2가 가장 뒤에 옴)
+                CASE V.listing_status
+                    WHEN '경매 중' THEN 2 
+                    WHEN '경매 예정' THEN 2 
+                    WHEN '판매 종료' THEN 2   -- 가장 뒤 (높은 값)
+                    WHEN '품절' THEN 1          -- 그 다음 뒤
+                    ELSE 0                    -- 가장 앞 (판매 중 등 활성 상태)
+                END ASC,
+                -- 2순위: 활성 상품 내에서는 최신 등록순
+                V.listing_id DESC
             """, (user_id,))
 
         my_products = [dict(row) for row in cur.fetchall()]
