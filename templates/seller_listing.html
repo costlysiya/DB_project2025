@@ -3,12 +3,12 @@
 {% block title %}상품 등록 | 셀렉트 마켓{% endblock %}
 
 {% block content %}
-    
+
     <h2>🛍️ 신규 굿즈 등록하기</h2>
     <p class="subtitle">1차 판매자는 공식 굿즈를, 2차 판매자는 리셀 굿즈를 등록할 수 있습니다.</p>
-    
+
     <div class="form-container wide">
-        
+
         <!-- (★) 폼 제출 로직이 AJAX(자바스크립트) 방식이므로 form의 action/method는 제거합니다. -->
         <form id="product-register-form">
 
@@ -21,7 +21,16 @@
                 <h3>1. 굿즈 마스터 정보 (Product)</h3>
                 <div class="form-group">
                     <label for="product_name">굿즈 이름 <span class="required">*</span></label>
-                    <input type="text" id="product_name" name="product_name" required placeholder="예: 아이돌 정규 앨범 1집">
+                    {% if session.user_role == 'Reseller' %}
+                        <select id="product_name" name="product_name" required>
+                            <option value="">-- 기존 상품명 선택 (필수) --</option>
+                            {% for name in product_names %}
+                                <option value="{{ name }}">{{ name }}</option>
+                            {% endfor %}
+                        </select>
+                    {% else %}
+                        <input type="text" id="product_name" name="product_name" required placeholder="새로운 상품명을 입력하세요.">
+                    {% endif %}
                 </div>
 
                 <div class="form-group">
@@ -86,7 +95,8 @@
 
                     <div class="form-group">
                         <label for="resale_images">실물 이미지 URL 목록 (쉼표로 구분)</label>
-                        <textarea id="resale_images" name="resale_images" rows="3" placeholder="이미지 URL을 쉼표(,)로 구분하여 입력하세요 (ListingImage)."></textarea>
+                        <input type="file" id="resale_images" name="resale_images" multiple accept="image/*"
+                               {% if session.user_role == 'Reseller' %} required {% endif %}>
                         <p class="note">⚠️ 2차 판매자는 실물 사진 URL을 입력하는 것이 좋습니다.</p>
                     </div>
 
@@ -195,47 +205,29 @@
                     event.preventDefault();
 
                     const formData = new FormData(form);
-                    const data = {};
-
-                    formData.forEach((value, key) => {
-                        // is_auction 체크박스가 체크되어 있을 경우만 true로 설정
-                        if (key === 'is_auction' && value === 'true') {
-                            data[key] = true;
-                        } else if (key === 'price' || key === 'stock' || key === 'auction_start_price') {
-                            // 숫자 필드는 정수로 변환하여 전송
-                            data[key] = value ? parseInt(value, 10) : null;
-                        } else if (key === 'resale_images') {
-                            // 쉼표로 구분된 URL을 배열로 변환
-                            data[key] = value ? value.split(',').map(url => url.trim()).filter(url => url) : [];
-                        } else {
-                            data[key] = value;
-                        }
-                    });
-
-                    // is_auction이 FormData에 아예 없으면 (체크 안됨), false로 설정
-                    if (!data.is_auction) {
-                        data.is_auction = false;
+                    // const data = {};
+                    if (!formData.has('is_auction')) {
+                        formData.append('is_auction', 'false');
                     }
 
-                    // ⚠️ 경매 시작 가격 (auction_start_price)에 일반 판매 가격을 대입합니다.
-                    if (data.is_auction) {
-                        data.auction_start_price = data.price;
+                    if (formData.get('is_auction') === 'true') {
+                         if (!formData.get('auction_start_price')) {
+                             formData.set('auction_start_price', formData.get('price'));
+                         }
                     }
 
-
-                    // 만약 messageDiv가 없다면 alert로 대체
                     if (messageDiv) {
                         messageDiv.textContent = '등록 중...';
                         messageDiv.style.color = 'gray';
                     }
 
+
                     try {
+                        // ⚠️ [가장 중요] 헤더에서 'Content-Type': 'application/json'을 제거하고,
+                        // FormData 객체 자체를 body에 넣어 전송합니다.
                         const response = await fetch('/api/product_register', {
                             method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify(data)
+                            body: formData // FormData 객체 직접 전송
                         });
 
                         const result = await response.json();

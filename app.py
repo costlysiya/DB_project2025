@@ -4,6 +4,8 @@ from psycopg2 import extras
 import os
 import datetime
 from decimal import Decimal
+from werkzeug.utils import secure_filename
+from typing import Optional, List
 from functools import wraps
 
 app = Flask(__name__)
@@ -13,6 +15,12 @@ app.secret_key = os.urandom(24)
 
 # --- 임시 관리자 인증 번호 ---
 ADMIN_AUTH_CODE = "ADMIN4567"
+
+# --- 파일 업로드 설정 (로컬 서버 경로) ---
+UPLOAD_FOLDER = 'static/uploads' # 파일을 저장할 경로 (static/uploads)
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # PostgreSQL Role 이름 매핑 함수 생성
 def map_role_to_db_role(app_role):
@@ -106,7 +114,39 @@ def get_products_from_db(role=None, category=None, search_term=None, auction_onl
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        sql_query = "SELECT * FROM V_All_Products"
+        sql_base_query = """
+                         SELECT L.listing_id, 
+                                L.listing_type, 
+                                L.price, 
+                                L.stock, 
+                                L.condition, 
+                                L.status,
+                                P.product_id, 
+                                P.name                              AS product_name, 
+                                P.category, 
+                                P.rating                            AS product_rating,
+                                COALESCE(LI.image_url, P.image_url) AS image_url,
+                                U.name                              AS seller_name, 
+                                SP.grade                            AS seller_grade,
+                                A.end_date, 
+                                A.auction_id,
+
+                                -- 최종 listing_status 계산 (경매 마감 여부 체크)
+                                CASE
+                                    WHEN L.listing_type = 'Resale' AND A.auction_id IS NOT NULL
+                                        AND NOW() AT TIME ZONE 'KST' > A.end_date THEN '판매 종료'
+                                    WHEN L.stock = 0 THEN '품절'
+                                    ELSE L.status
+                                    END AS listing_status                           
+                         FROM Listing L
+                                  JOIN Product P ON L.product_id = P.product_id
+                                  JOIN Users U ON L.seller_id = U.user_id
+                                  JOIN SellerProfile SP ON U.user_id = SP.user_id
+                                  LEFT JOIN Auction A ON L.listing_id = A.listing_id
+                                  LEFT JOIN ListingImage LI ON L.listing_id = LI.listing_id AND LI.is_main = TRUE 
+                         """
+
+        sql_query = sql_base_query
         conditions = []
         params = []
 
@@ -127,27 +167,28 @@ def get_products_from_db(role=None, category=None, search_term=None, auction_onl
             sql_query += " WHERE " + " AND ".join(conditions)
 
         status_order_clause = """
-            CASE listing_status
-                WHEN '판매 종료' THEN 2   -- 경매 완료 (가장 낮은 우선순위)
-                WHEN '품절' THEN 1          -- 품절 (두 번째로 낮은 우선순위)
-                ELSE 0                    -- 그 외 (판매 중, 경매 중/예정)
-            END ASC,
+            CASE 
+                WHEN L.listing_type = 'Resale' AND A.auction_id IS NOT NULL 
+                     AND NOW() AT TIME ZONE 'KST' > A.end_date THEN 2   -- 판매 종료 (2)
+                WHEN L.stock = 0 THEN 1                                 -- 품절 (1)
+                ELSE 0                                                    -- 그 외 (0)
+            END ASC
         """
 
         #정렬 로직 추가: sort_by 값에 따라 ORDER BY 절을 동적으로 변경
         if sort_by == 'low_price':
-            main_order_clause = " price ASC"
+            main_order_clause = " L.price ASC"
         elif sort_by == 'high_price':
-            main_order_clause = " price DESC"
+            main_order_clause = " L.price DESC"
         elif sort_by == 'rating':
             # 등급은 S, A, B 순이므로 DESC, NULLS LAST는 등급이 없는 상품을 뒤로 보냄
-            main_order_clause = " product_rating DESC NULLS LAST, listing_id DESC"
+            main_order_clause = " P.product_rating DESC NULLS LAST, L.listing_id DESC"
         else:
             # 기본 정렬: 최신 등록순
-            main_order_clause = " listing_id DESC"
+            main_order_clause = " L.listing_id DESC"
 
             # 3. 최종 ORDER BY 절 조합: 상태 우선순위 + 메인 기준 적용
-        order_clause = " ORDER BY " + status_order_clause + main_order_clause
+        order_clause = f" ORDER BY {status_order_clause}, {main_order_clause}"
 
         sql_query += order_clause
 
@@ -165,6 +206,31 @@ def get_products_from_db(role=None, category=None, search_term=None, auction_onl
         print(f"상품 조회 중 오류 발생: {str(e)}")
 
     return products, len(products)
+
+#추가된 함수(daeun)
+def get_all_product_names(role=None):
+    """ Product 테이블에 등록된 모든 상품 이름을 조회합니다. """
+    conn = get_db_connection(role=role)
+    if conn is None:
+        return []
+
+    names = []
+    try:
+        cur = conn.cursor()
+        # DISTINCT를 사용하여 중복 없이 상품 이름만 가져옵니다.
+        cur.execute("SELECT DISTINCT name FROM Product ORDER BY name ASC")
+        # 일반 커서이므로 튜플 형태로 반환됨 (row[0] 사용)
+        names = [row[0] for row in cur.fetchall()]
+        cur.close()
+    except Exception as e:
+        if conn:
+            conn.close()
+        print(f"상품 이름 조회 오류: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+    return names
 
 
 # 사용자 정보 가져오는 함수
@@ -999,10 +1065,21 @@ def show_product_register_page():
     if 'user_id' not in session:
         return redirect(url_for('show_login_page'))
 
-    if session.get('user_role') not in ['PrimarySeller', 'Reseller']:
+    user_role = session.get('user_role')
+    if user_role not in ['PrimarySeller', 'Reseller']:
         return "상품 등록 권한이 없습니다.", 403
 
-    return render_template('seller_listing.html')
+    db_role = map_role_to_db_role(user_role)
+
+    product_names = []
+    if user_role == 'Reseller':
+        # 2차 판매자일 경우에만 기존 상품명 목록을 조회
+        product_names = get_all_product_names(role=db_role)
+
+    return render_template(
+        'seller_listing.html',
+        product_names=product_names  # 목록을 템플릿에 전달
+    )
 
 # --- 경매/리셀 페이지 ---
 @app.route('/resale/auction')
@@ -1249,20 +1326,54 @@ def product_register():
     if seller_role not in ['PrimarySeller', 'Reseller']:
         return jsonify({"error": "상품 등록 권한이 없는 역할입니다."}), 403
 
-    data = request.json
-    product_name = data.get('product_name')
-    category = data.get('category')
-    price = data.get('price')
-    stock = data.get('stock')
-    description = data.get('description')
-    master_image_url = data.get('master_image_url')
-    listing_status = data.get('listing_status', '판매중')
-    condition = data.get('condition')
-    resale_images = data.get('resale_images', [])
-    is_auction = data.get('is_auction', False)
-    auction_start_price = data.get('auction_start_price')
-    auction_start_date = data.get('auction_start_date')
-    auction_end_date = data.get('auction_end_date')
+    # request.json 대신 request.form과 request.files에서 데이터 수신
+    form_data = request.form
+    uploaded_files = request.files.getlist('resale_images')
+
+    product_name = form_data.get('product_name')
+    category = form_data.get('category')
+    # 가격/재고는 문자열로 오므로 int()로 변환 시도
+    try:
+        price = int(form_data.get('price'))
+        stock = int(form_data.get('stock'))
+    except (ValueError, TypeError):
+        return jsonify({"error": "가격(Price) 또는 재고(Stock)가 유효한 숫자가 아닙니다."}), 400
+
+    description = form_data.get('description')
+    master_image_url = form_data.get('master_image_url')
+    listing_status = form_data.get('listing_status', '판매중')
+    condition = form_data.get('condition')
+
+    # is_auction은 'true' 문자열로 오거나, 아예 누락됩니다.
+    is_auction = form_data.get('is_auction') == 'true'
+
+    # 경매 관련 필드도 form_data에서 가져옵니다.
+    auction_start_price_str = form_data.get('auction_start_price')
+    auction_start_date = form_data.get('auction_start_date')
+    auction_end_date = form_data.get('auction_end_date')
+
+    auction_start_price = None
+    if auction_start_price_str:
+        try:
+            auction_start_price = int(auction_start_price_str)
+        except (ValueError, TypeError):
+            return jsonify({"error": "경매 시작 가격이 유효한 숫자가 아닙니다."}), 400
+
+    #data = request.json
+    #product_name = data.get('product_name')
+    #category = data.get('category')
+    #price = data.get('price')
+    #stock = data.get('stock')
+
+    #description = data.get('description')
+    #master_image_url = data.get('master_image_url')
+    #listing_status = data.get('listing_status', '판매중')
+    #condition = data.get('condition')
+
+    #is_auction = data.get('is_auction', False)
+    #auction_start_price = data.get('auction_start_price')
+    #auction_start_date = data.get('auction_start_date')
+    #auction_end_date = data.get('auction_end_date')
 
     if not all([product_name, category, price, stock]):
         return jsonify({"error": "필수 상품 정보(상품명, 카테고리, 가격, 재고)가 누락되었습니다."}), 400
@@ -1277,6 +1388,8 @@ def product_register():
             return jsonify({"error": "2차 판매자는 상품 상태(condition)를 필수로 입력해야 합니다."}), 400
         if is_auction and not all([auction_start_price, auction_start_date, auction_end_date]):
             return jsonify({"error": "경매 등록 시 시작가, 시작일, 종료일이 모두 필요합니다."}), 400
+        if not uploaded_files or (len(uploaded_files) == 1 and uploaded_files[0].filename == ''):
+            return jsonify({"error": "2차 판매자는 실물 이미지 파일을 1개 이상 업로드해야 합니다."}), 400
 
     conn = get_db_connection(role=db_role)
     if conn is None:
@@ -1284,36 +1397,79 @@ def product_register():
 
     conn.autocommit = False
 
+    # ⚠️ 파일 업로드 및 DB 트랜잭션 시작
+    uploaded_image_urls: List[str] = []
+
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur.execute(
-            "SELECT product_id FROM Product WHERE name = %s AND category = %s",
-            (product_name, category)
-        )
-        existing_product = cur.fetchone()
+
+        for file in uploaded_files:
+            if file.filename:
+                # Flask의 static 폴더에 파일 저장
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                # DB에 저장할 URL (static 경로)
+                uploaded_image_urls.append(url_for('static', filename=f'uploads/{filename}', _external=True))
 
         product_id = None
-        if existing_product:
-            product_id = existing_product[0]
-            if seller_role == 'PrimarySeller' and (description or master_image_url):
+        category_for_listing = category  # Listing 테이블에 들어갈 최종 카테고리
+
+        if seller_role == 'Reseller':
+            # 1-1. ✨ 2차 판매자: 기존 Product ID 찾기 (선택만 가능) ✨
+            if not product_name:
+                conn.rollback()
+                return jsonify({"error": "2차 판매자는 기존 상품명을 선택해야 합니다."}), 400
+
+            cur.execute(
+                "SELECT product_id, category FROM Product WHERE name = %s",
+                (product_name,)
+            )
+            existing_product = cur.fetchone()
+
+            if not existing_product:
+                conn.rollback()
+                return jsonify({"error": "선택한 상품명이 Product 테이블에 존재하지 않습니다."}), 400
+
+            product_id = existing_product['product_id']
+            category_for_listing = existing_product['category']  # 2차 판매자는 기존 카테고리 사용
+
+            # ⚠️ 2차 판매자는 경매 등급 확인 로직과 Primary Listing 중복 검사가 바로 이어집니다.
+            #    (기존 코드의 순서를 유지합니다.)
+
+        else:  # seller_role == 'PrimarySeller'
+            # 1-2. ✨ 1차 판매자: 새 상품 등록 또는 업데이트 ✨
+            cur.execute(
+                "SELECT product_id FROM Product WHERE name = %s AND category = %s",
+                (product_name, category)
+            )
+            existing_product = cur.fetchone()
+
+            if existing_product:
+                product_id = existing_product['product_id']
+                # Product UPDATE 로직
+                if description or master_image_url:
+                    cur.execute(
+                        """
+                        UPDATE Product
+                        SET description = COALESCE(%s, description),
+                            image_url   = COALESCE(%s, image_url)
+                        WHERE product_id = %s
+                        """,
+                        (description, master_image_url, product_id)
+                    )
+            else:
+                # Product INSERT 로직
                 cur.execute(
                     """
-                    UPDATE Product
-                    SET description = COALESCE(%s, description),
-                        image_url   = COALESCE(%s, image_url)
-                    WHERE product_id = %s
+                    INSERT INTO Product (name, category, description, image_url)
+                    VALUES (%s, %s, %s, %s) RETURNING product_id
                     """,
-                    (description, master_image_url, product_id)
+                    (product_name, category, description, master_image_url)
                 )
-        else:
-            cur.execute(
-                """
-                INSERT INTO Product (name, category, description, image_url)
-                VALUES (%s, %s, %s, %s) RETURNING product_id
-                """,
-                (product_name, category, description, master_image_url)
-            )
-            product_id = cur.fetchone()[0]
+                product_id = cur.fetchone()[0]
+
+        # --- 2. 2차 판매자 경매/중복 검사 (product_id가 확정된 후 실행) ---
 
         if seller_role == 'Reseller' and is_auction:
             cur.execute("SELECT rating FROM Product WHERE product_id = %s", (product_id,))
@@ -1338,17 +1494,22 @@ def product_register():
                 conn.rollback()
                 return jsonify({"error": "경매 등록 실패: 해당 상품의 1차 판매자가 여전히 판매/경매 중입니다."}), 403
 
+        # --- 3. Listing 테이블 삽입 (공통 로직) ---
         cur.execute(
             """
             INSERT INTO Listing (product_id, seller_id, listing_type, price, stock, status, condition)
             VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING listing_id
             """,
+            # ⚠️ 2차 판매자일 경우, category_for_listing 변수를 사용해야 하지만,
+            # Listing 테이블은 category 컬럼이 없으므로 product_id만 사용합니다.
             (product_id, seller_id, listing_type, price, stock, listing_status, condition)
         )
         listing_id = cur.fetchone()[0]
 
-        if seller_role == 'Reseller' and resale_images:
-            for i, img_url in enumerate(resale_images):
+        # ... (이후 ListingImage 및 Auction INSERT 로직 유지) ...
+
+        if seller_role == 'Reseller' and uploaded_image_urls:
+            for i, img_url in enumerate(uploaded_image_urls):
                 is_main = (i == 0)
                 cur.execute(
                     "INSERT INTO ListingImage (listing_id, image_url, is_main) VALUES (%s, %s, %s)",
@@ -1396,6 +1557,8 @@ def product_register():
             "listing_id": listing_id,
             "listing_type": listing_type
         }), 201
+
+    # ... (except Exception as e: 블록 유지) ...
 
     except Exception as e:
         conn.rollback()
