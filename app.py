@@ -2767,7 +2767,7 @@ def api_admin_seller_eval():
         return jsonify({"error": "DB 연결 실패"}), 500
 
     conn.autocommit = False
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     try:
         # 2. 피드백 유효성 확인 및 현재 상태 조회
