@@ -1091,8 +1091,8 @@ def show_product_register_page():
         product_names=product_names  # 목록을 템플릿에 전달
     )
 
-# --- 경매/리셀 페이지 ---
-@app.route('/resale/auction')
+# --- 경매 페이지 ---
+@app.route('/category/auction')
 def show_auction_page():
     user_role = session.get('user_role')
     db_role = map_role_to_db_role(user_role)
@@ -1105,7 +1105,7 @@ def show_auction_page():
         'index.html',
         products=products,
         product_count=product_count,
-        page_title="🔥 경매 / 리셀 상품",
+        page_title="🔥 경매 상품",
         sort_by=sort_by  #  템플릿에 전달하여 선택 상태 유지
     )
 
