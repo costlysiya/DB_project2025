@@ -107,7 +107,6 @@
                                             <span class="status-dispute status-pending">요청 접수 대기</span>
                                         {% else %}
                                             -
-                                            <!--<span class="status-dispute status-processing">{{ order.status }} 처리 중</span> -->
                                         {% endif %}
                                     {% else %}
                                          -
@@ -125,7 +124,7 @@
             <!--상품 목록 (Seller)-->
             <h3>📈 내 상품 목록 (재고 관리)</h3>
 
-            <!-- (★) AJAX 메시지 표시 영역 -->
+            <!-- AJAX 메시지 표시 영역 -->
             <div id="update-message-area" style="margin: 15px 0; padding: 10px; border-radius: 6px; display: none; font-weight: bold;"></div>
 
             {% if my_products %}
@@ -155,12 +154,12 @@
                                 </a>
                                 <!-- 상품명 Input -->
                                 <input type="text" class="form-control product-name-input" value="{{ product.product_name }}"
-                                {% if product.listing_status in ['경매 예정', '경매 중', '판매 종료'] %}disabled style="background-color:#e9ecef;"{% endif %}>
+                                {% if product.listing_status in ['경매 예정', '경매 중', '판매 종료'] or user_profile.user.role == 'Reseller' %}disabled style="background-color:#e9ecef;"{% endif %}>
                             </td>
                             <td>
                                 <!-- 카테고리 Select -->
                                     <select class="form-control category-select"
-                                    {% if product.listing_status in ['경매 예정', '경매 중', '판매 종료'] %}disabled style="background-color:#e9ecef;"{% endif %}>
+                                    {% if product.listing_status in ['경매 예정', '경매 중', '판매 종료'] or user_profile.user.role == 'Reseller' %}disabled style="background-color:#e9ecef;"{% endif %}>
                                         {% for cat in ['음반', '피규어', '인형', '아크릴', '응원도구', '포카', '의류', '기타'] %}
                                         <option value="{{ cat }}" {% if product.category == cat %}selected{% endif %}>{{ cat }}</option>
                                         {% endfor %}
@@ -234,23 +233,6 @@
                 <p>등록한 상품이 없습니다. <a href="{{ url_for('show_product_register_page') }}">상품을 등록</a>해보세요.</p>
             {% endif %}
 
-            <!-- 다은 TODO: style뺴기. -->
-            <style>
-                .form-control {
-                    width: 100%;
-                    padding: 8px;
-                    border: 1px solid #ccc;
-                    border-radius: 4px;
-                }
-                .order-history-table td {
-                    vertical-align: middle;
-                    min-width: 120px;
-                }
-                .order-history-table td input[type="number"] {
-                    width: 80px;
-                }
-            </style>
-
             {% elif view == 'sales' %}
             <h3>💰 판매 내역(주문 내역)</h3>
                 <!--판매 내역(Seller)-->
@@ -302,7 +284,6 @@
                     <p>최근 판매 내역이 없습니다.</p>
                 {% endif %}
             {% elif view == 'disputes' %}
-            <!-- TODO: 분쟁 처리 현황 (Buyer) -->
             <h3>📞 분쟁 처리 현황</h3>
                 {% if disputes %}
                 <p>총 {{ disputes | length }}건의 분쟁 요청 내역이 있습니다.</p>
@@ -327,7 +308,6 @@
                             <td>{{ dispute.product_name }}</td>
                             <td>{{ dispute.seller_name }}</td>
                             <td>{{ dispute.order_status }}</td>
-
                             <td><span class="dispute-status status-{{ dispute.dispute_status | lower | replace(' ', '') }}">{{ dispute.dispute_status }}</span></td>
                             <td>{{ dispute.reason }}</td>
                         </tr>
@@ -358,7 +338,6 @@
                             {% for order in finished_orders %}
                             {% set is_completed = order.feedback_submitted %}
                             {% set disabled_attr = 'disabled' if is_completed else '' %}
-
                             {% set current_rating = order.feedback_rating | default(5) %}
                             {% set current_comment = order.feedback_comment | default('') %}
                             <tr>
@@ -595,7 +574,6 @@
             {% endif %}
             {% elif view == 'admin_seller_eval' %}
             <h3>🏆 판매자 평가 관리</h3>
-<!--            TODO: 판매자 평가 관리 기능 구현(admin)-->
                 {% if all_feedback%}
                     <p>총 {{ all_feedback | length }}건의 후기들이 있습니다.</p>
                     <table class="order-history-table">

@@ -1051,3 +1051,93 @@ h2 {
     font-weight: bold;
     color: #2ecc71;
 }
+
+.form-control {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+.order-history-table td {
+    vertical-align: middle;
+    min-width: 120px;
+}
+.order-history-table td input[type="number"] {
+    width: 80px;
+}
+
+.thumbnail-list img {
+    width: 80px;
+    height: 80px;
+    object-fit: cover; /* 이미지 비율 유지 */
+    cursor: pointer;
+    border: 2px solid transparent;
+    border-radius: 4px;
+    transition: border-color 0.2s;
+}
+.thumbnail-list img:hover {
+    border-color: #ff69b4; /* style.css 핑크색 */
+}
+
+.auction-box {
+    padding: 20px;
+    background-color: #fcf8e3;
+    border: 1px solid #faebcc;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+.auction-status-title {
+    text-align: center;
+    font-size: 1.3em;
+    color: #f57f17;
+    margin-bottom: 15px;
+}
+.auction-details-info p {
+    margin: 5px 0;
+    font-size: 0.9em;
+    color: #555;
+}
+.current-bid-section {
+    text-align: center;
+    margin: 20px 0;
+    padding: 15px 0;
+    border-top: 1px dashed #f0e6c3;
+    border-bottom: 1px dashed #f0e6c3;
+}
+.current-bid-section .label {
+    display: block;
+    font-size: 0.9em;
+    color: #777;
+}
+.current-bid-section .price-value {
+    font-size: 1.8em;
+    font-weight: bold;
+    color: #dc3545;
+}
+.bidder-info {
+    font-size: 0.85em;
+    color: #333;
+    margin-top: 5px;
+}
+.bid-input-group {
+    text-align: left;
+    margin-bottom: 15px;
+}
+.bid-input-group label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+.bid-input-group input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+.bid-btn {
+    width: 100%;
+    padding: 12px;
+    font-size: 1.1em;
+    background-color: #ff69b4;
+    color: white;
+}

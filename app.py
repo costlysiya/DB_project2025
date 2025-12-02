@@ -44,7 +44,7 @@ def get_db_connection(role=None):
             port="5432",
             client_encoding='UTF8'
         )
-        # (★신규) 역할(Role)이 전달되면 즉시 권한 설정
+
         if role:
             cur = conn.cursor()
             #cur.execute("SELECT set_app_role(%s)", (role,))
@@ -74,7 +74,7 @@ def check_db_connection():
 
 
 def format_datetime(value, format='%Y-%m-%d %H:%M:%S'):
-    """ datetime 객체를 지정된 포맷의 문자열로 변환하는 필터 """
+    #datetime 객체를 지정된 포맷의 문자열로 변환
     if value is None:
         return ""
     if isinstance(value, datetime.datetime):
@@ -89,7 +89,7 @@ app.jinja_env.filters['datetime_format'] = format_datetime
 
 
 def format_number(value):
-    """ 숫자를 천 단위 쉼표로 포맷팅하는 필터 """
+    #숫자를 천 단위 쉼표로 포맷팅
     if value is None:
         return "0"
     try:
@@ -122,12 +122,13 @@ def get_products_from_db(role=None, category=None, search_term=None, auction_onl
                     L.stock, 
                     L.condition, 
                     L.status,
+                    L.list_description as list_description,
                     P.product_id, 
                     P.name                              AS product_name, 
                     P.category, 
                     P.rating                            AS product_rating,
                     COALESCE(LI.image_url, P.image_url) AS image_url,
-                    U.name                              AS seller_name, 
+                    SP.store_name                              AS seller_name, 
                     SP.grade                            AS seller_grade,
                     A.end_date, 
                     A.auction_id,
@@ -206,19 +207,16 @@ def get_products_from_db(role=None, category=None, search_term=None, auction_onl
 
     return products, len(products)
 
-#추가된 함수(daeun)
+#Product 테이블에 등록된 모든 상품 이름을 조회
 def get_all_product_names(role=None):
-    """ Product 테이블에 등록된 모든 상품 이름을 조회합니다. """
     conn = get_db_connection(role=role)
     if conn is None:
         return []
-
     names = []
     try:
         cur = conn.cursor()
-        # DISTINCT를 사용하여 중복 없이 상품 이름만 가져옵니다.
+        # DISTINCT를 사용하여 중복 없이 상품 이름만 가져옴
         cur.execute("SELECT DISTINCT name FROM Product ORDER BY name ASC")
-        # 일반 커서이므로 튜플 형태로 반환됨 (row[0] 사용)
         names = [row[0] for row in cur.fetchall()]
         cur.close()
     except Exception as e:
@@ -371,7 +369,7 @@ def get_orders_for_buyer(user_id, order_status, role=None):
                                
                         FROM orderb O
                         JOIN v_all_products V ON O.listing_id = V.listing_id
-                        LEFT JOIN Feedback F ON O.order_id = F.order_id -- 🚨 LEFT JOIN으로 수정
+                        LEFT JOIN Feedback F ON O.order_id = F.order_id 
                         
                         WHERE O.buyer_id = %s
                           AND O.status = '구매 확정'
@@ -457,13 +455,13 @@ def get_my_products_list(user_id, role=None):
             FROM listing L, v_all_products V  
             WHERE L.listing_id = V.listing_id and L.seller_id = %s
             ORDER BY
-                -- 1순위: 상태 우선순위에 따른 정렬 (ASC이므로 2가 가장 뒤에 옴)
+                -- 1순위: 상태 우선순위에 따른 정렬
                 CASE V.listing_status
                     WHEN '경매 중' THEN 2 
                     WHEN '경매 예정' THEN 2 
-                    WHEN '판매 종료' THEN 2   -- 가장 뒤 (높은 값)
-                    WHEN '품절' THEN 1          -- 그 다음 뒤
-                    ELSE 0                    -- 가장 앞 (판매 중 등 활성 상태)
+                    WHEN '판매 종료' THEN 2   
+                    WHEN '품절' THEN 1         
+                    ELSE 0                    
                 END ASC,
                 -- 2순위: 활성 상품 내에서는 최신 등록순
                 V.listing_id DESC
@@ -482,7 +480,7 @@ def get_my_products_list(user_id, role=None):
 
 # 장바구니 수량 계산 함수
 def calculate_cart_count(user_id, role=None):
-    """ 현재 사용자의 장바구니에 담긴 총 상품 개수를 계산합니다. """
+    #현재 사용자의 장바구니에 담긴 총 상품 개수를 계산합니다.
     if not user_id:
         return 0
 
@@ -507,30 +505,8 @@ def calculate_cart_count(user_id, role=None):
         if conn:
             conn.close()
 
-
-# # 2. 모든 요청 전에 실행되는 함수 등록 (Flask의 before_request 사용)
-# @app.before_request
-# def load_user_data_to_session():
-#     user_id = session.get('user_id')
-#     user_role = session.get('user_role')
-#     db_role = map_role_to_db_role(user_role)
-#     # 사용자 ID가 세션에 있을 경우에만 실행
-#     if 'user_id' in session and session['user_role'] == 'Buyer':
-#         # 장바구니 수량을 계산하여 세션에 저장
-#         session['cart_count'] = calculate_cart_count(user_id, role=db_role)
-#     else:
-#         # 비구매자 또는 비로그인 상태는 0으로 초기화
-#         session['cart_count'] = 0
-#
-#     # Jinja2 템플릿에서 session 객체에 직접 접근하도록 설정
-#     # (이미 되어 있을 가능성이 높지만, 명시적으로 해줍니다.)
-#     from flask import g
-#     g.session = session  # 모든 템플릿에서 session을 사용할 수 있도록 보장 (선택적)
-
-
-#관리자 분쟁 조정 함수
+#관리자 분쟁 조정 함수 (모든 분쟁 조회)
 def get_disputes(role=None):
-    """ 모든 분쟁 목록을 조회합니다 (관리자 전용). """
     conn = get_db_connection(role=role)
     if conn is None:
         return []
@@ -538,8 +514,6 @@ def get_disputes(role=None):
     disputes = []
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
-        # Dispute 테이블과 Orderb, Users 테이블을 조인하여 필요한 정보를 가져옵니다.
         cur.execute("""
                     SELECT D.dispute_id,
                            D.issue_type,
@@ -571,7 +545,7 @@ def get_disputes(role=None):
         if conn:
             conn.close()
 
-
+#구매자의 분쟁 조회 함수
 def get_disputes_for_buyer(buyer_id, role=None):
     conn = get_db_connection(role=role)
     if conn is None:
@@ -580,8 +554,6 @@ def get_disputes_for_buyer(buyer_id, role=None):
     disputes = []
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
-        # Dispute 테이블과 Orderb, Listing, Product 테이블을 조인하여 분쟁 요청 내역을 가져옵니다.
         cur.execute("""
                     SELECT D.dispute_id,
                            D.issue_type,
@@ -601,7 +573,6 @@ def get_disputes_for_buyer(buyer_id, role=None):
                     ORDER BY D.dispute_id DESC;
                     """, (buyer_id,))
         disputes = [dict(row) for row in cur.fetchall()]
-
         cur.close()
         return disputes
 
@@ -655,15 +626,13 @@ def update_seller_evaluation(cur, conn, seller_id):
         GROUP BY
             target_seller_id
         HAVING 
-            COUNT(feedback_id) >= 3; 
+            COUNT( CASE WHEN is_checked = TRUE then 1 ELSE NULL END) >= 3; 
         """,
         (seller_id,)
     )
     summary = cur.fetchone()
 
     # 2. 결과 해석 및 등급 결정
-    # HAVING 절을 통과하지 못하면 summary는 None이 됩니다.
-
     if summary:
         avg_score = float(summary['calculated_avg_score'])
         total_feedbacks = summary['total_feedbacks']
@@ -674,7 +643,7 @@ def update_seller_evaluation(cur, conn, seller_id):
 
     final_score = avg_score
 
-    # 2. 평균 점수를 기반으로 등급(grade) 결정 (새 기준 적용)
+    # 2. 평균 점수를 기반으로 등급(grade) 결정
     if total_feedbacks < 3:  # 3건 미만인 경우
         final_grade = 'Bronze'
     elif avg_score == 5.0:
@@ -781,6 +750,7 @@ def show_product_detail(listing_id):
                    L.stock,
                    L.status,
                    L.condition,
+                   L.list_description,
                    P.name   AS product_name,
                    P.category,
                    P.description,
@@ -812,6 +782,7 @@ def show_product_detail(listing_id):
             listing = {
                 'listing_id': data['listing_id'],
                 'listing_type': data['listing_type'],
+                'list_description': data['list_description'],
                 'price': data['price'],
                 'stock': data['stock'],
                 'status': data['status'],
@@ -1162,7 +1133,7 @@ def show_mypage():
         template_data["my_products"] = get_my_products_list(user_id, role=db_role)
     elif current_view == 'disputes' and user_role == 'Buyer':
         template_data["disputes"] = get_disputes_for_buyer(user_id, role=db_role)
-    elif current_view == 'admin_disputes' and user_role == 'Administrator': # ✨ 관리자 역할일 때만 모든 분쟁 목록을 조회합니다. ✨
+    elif current_view == 'admin_disputes' and user_role == 'Administrator':
         template_data["admin_disputes"] = get_disputes(role=db_role)
     elif current_view == 'admin_rating' and user_role == 'Administrator':
         template_data["products"] = get_products_for_admin_rating(role=db_role)
@@ -1309,20 +1280,6 @@ def login_user():
         return jsonify({"error": f"로그인 중 오류 발생: {str(e)}"}), 500
 
 
-# --- 세션 확인 API (개발 테스트용) ---
-@app.route('/api/check_session', methods=['GET'])
-def check_session():
-    if 'user_id' in session:
-        return jsonify({
-            "logged_in": True,
-            "user_id": session['user_id'],
-            "user_name": session['user_name'],
-            "user_role": session['user_role']
-        }), 200
-    else:
-        return jsonify({"logged_in": False}), 200
-
-
 # --- 상품 등록 API ---
 @app.route('/api/product_register', methods=['POST'])
 def product_register():
@@ -1354,10 +1311,10 @@ def product_register():
     listing_status = form_data.get('listing_status', '판매중')
     condition = form_data.get('condition')
 
-    # is_auction은 'true' 문자열로 오거나, 아예 누락됩니다.
+    # is_auction은 'true' 문자열로 오거나, 아예 누락됨
     is_auction = form_data.get('is_auction') == 'true'
 
-    # 경매 관련 필드도 form_data에서 가져옵니다.
+    # 경매 관련 필드
     auction_start_price_str = form_data.get('auction_start_price')
     auction_start_date = form_data.get('auction_start_date')
     auction_end_date = form_data.get('auction_end_date')
@@ -1368,22 +1325,6 @@ def product_register():
             auction_start_price = int(auction_start_price_str)
         except (ValueError, TypeError):
             return jsonify({"error": "경매 시작 가격이 유효한 숫자가 아닙니다."}), 400
-
-    #data = request.json
-    #product_name = data.get('product_name')
-    #category = data.get('category')
-    #price = data.get('price')
-    #stock = data.get('stock')
-
-    #description = data.get('description')
-    #master_image_url = data.get('master_image_url')
-    #listing_status = data.get('listing_status', '판매중')
-    #condition = data.get('condition')
-
-    #is_auction = data.get('is_auction', False)
-    #auction_start_price = data.get('auction_start_price')
-    #auction_start_date = data.get('auction_start_date')
-    #auction_end_date = data.get('auction_end_date')
 
     if not all([product_name, category, price, stock]):
         return jsonify({"error": "필수 상품 정보(상품명, 카테고리, 가격, 재고)가 누락되었습니다."}), 400
@@ -1407,7 +1348,7 @@ def product_register():
 
     conn.autocommit = False
 
-    # ⚠️ 파일 업로드 및 DB 트랜잭션 시작
+    # 파일 업로드 및 DB 트랜잭션 시작
     uploaded_image_urls: List[str] = []
 
     try:
@@ -1426,7 +1367,7 @@ def product_register():
         category_for_listing = category  # Listing 테이블에 들어갈 최종 카테고리
 
         if seller_role == 'Reseller':
-            # 1-1. ✨ 2차 판매자: 기존 Product ID 찾기 (선택만 가능) ✨
+            # 2차 판매자: 기존 Product ID 찾기 (선택만 가능)
             if not product_name:
                 conn.rollback()
                 return jsonify({"error": "2차 판매자는 기존 상품명을 선택해야 합니다."}), 400
@@ -1444,11 +1385,9 @@ def product_register():
             product_id = existing_product['product_id']
             category_for_listing = existing_product['category']  # 2차 판매자는 기존 카테고리 사용
 
-            # ⚠️ 2차 판매자는 경매 등급 확인 로직과 Primary Listing 중복 검사가 바로 이어집니다.
-            #    (기존 코드의 순서를 유지합니다.)
 
         else:  # seller_role == 'PrimarySeller'
-            # 1-2. ✨ 1차 판매자: 새 상품 등록 또는 업데이트 ✨
+            # 1차 판매자: 새 상품 등록 또는 업데이트
             cur.execute(
                 "SELECT product_id FROM Product WHERE name = %s AND category = %s",
                 (product_name, category)
@@ -1457,19 +1396,19 @@ def product_register():
 
             if existing_product:
                 product_id = existing_product['product_id']
+                pass
                 # Product UPDATE 로직
-                if description or master_image_url:
-                    cur.execute(
-                        """
-                        UPDATE Product
-                        SET description = COALESCE(%s, description),
-                            image_url   = COALESCE(%s, image_url)
-                        WHERE product_id = %s
-                        """,
-                        (description, master_image_url, product_id)
-                    )
+                # if description or master_image_url:
+                #     cur.execute(
+                #         """
+                #         UPDATE Product
+                #         SET description = COALESCE(%s, description),
+                #             image_url   = COALESCE(%s, image_url)
+                #         WHERE product_id = %s
+                #         """,
+                #         (description, master_image_url, product_id)
+                #     )
             else:
-                # Product INSERT 로직
                 cur.execute(
                     """
                     INSERT INTO Product (name, category, description, image_url)
@@ -1507,16 +1446,17 @@ def product_register():
         # --- 3. Listing 테이블 삽입 (공통 로직) ---
         cur.execute(
             """
-            INSERT INTO Listing (product_id, seller_id, listing_type, price, stock, status, condition)
-            VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING listing_id
+            INSERT INTO Listing (product_id, seller_id, listing_type, price, stock, status, condition, list_description)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING listing_id
             """,
-            # ⚠️ 2차 판매자일 경우, category_for_listing 변수를 사용해야 하지만,
-            # Listing 테이블은 category 컬럼이 없으므로 product_id만 사용합니다.
-            (product_id, seller_id, listing_type, price, stock, listing_status, condition)
+            (product_id, seller_id, listing_type, price, stock, listing_status, condition, description)
         )
         listing_id = cur.fetchone()[0]
 
-        # ... (이후 ListingImage 및 Auction INSERT 로직 유지) ...
+        # if seller_role == 'Reseller' and description:
+        #     cur.execute(
+        #         "UPDATE Listing SET list_description WHERE listing_id = %s", (listing_id,)
+        #     )
 
         if seller_role == 'Reseller' and uploaded_image_urls:
             for i, img_url in enumerate(uploaded_image_urls):
@@ -2051,8 +1991,6 @@ def place_order():
         final_total = total_order_price + shipping_fee
 
         # 3. Orderb 테이블에 주문 삽입 (단일 주문으로 처리)
-        # 실제로는 여러 리스팅 ID가 하나의 주문 ID를 공유하도록 OrderDetail 테이블을 사용해야 하지만,
-        # 여기서는 단순화를 위해 각 리스팅별 주문으로 Orderb에 삽입
         order_ids = []
         for detail in order_details:
             cur.execute(
@@ -2220,7 +2158,7 @@ def api_update_profile():
 
         # 2. 역할별 프로필 테이블 업데이트
         if role == 'Buyer' and new_address:
-            # BuyerProfile에 주소 업데이트 (INSERT ON CONFLICT UPDATE 로직이 더 안전하지만, 여기서는 UPDATE로 단순화)
+            # BuyerProfile에 주소 업데이트
             cur.execute("UPDATE BuyerProfile SET address = %s WHERE user_id = %s", (new_address, user_id))
 
         elif role in ['PrimarySeller', 'Reseller'] and new_store_name:
@@ -2298,7 +2236,6 @@ def update_product_listing():
         product_id = listing_info['product_id']
 
         # 2. Product 테이블 업데이트 (상품명, 카테고리)
-        # Note: 실제 서비스에서는 Product 테이블 업데이트 권한 및 로직이 더 복잡할 수 있음.
         cur.execute(
             """
             UPDATE Product SET
@@ -2312,7 +2249,6 @@ def update_product_listing():
         # 3. Listing 테이블 업데이트 (가격, 재고, 판매 상태, 상태)
         # condition이 빈 문자열이면 NULL로 처리
         final_condition = condition if condition else None
-
         cur.execute(
             """
             UPDATE Listing SET
@@ -2505,7 +2441,7 @@ def update_dispute_status():
                 (new_dispute_status, dispute_id)
             )
 
-        # 3. ✨ 처리 완료 (승인/거절) 로직 ✨
+        # 3. 처리 완료 (승인/거절) 로직
         if new_dispute_status == '처리 완료':
 
             if resolution == '거절':
@@ -2629,7 +2565,6 @@ def confirm_purchase():
             conn.rollback()
             return jsonify({"error": f"주문 상태 '{current_status}'는 확정할 수 없습니다. '배송 완료' 상태에서만 가능합니다."}), 400
         # 3. Orderb 상태를 '구매 확정'으로 변경
-        # ( DB의 order_status ENUM에 '구매 확정'이 추가되었다고 가정합니다.)
         cur.execute(
             "UPDATE Orderb SET status = '구매 확정' WHERE order_id = %s",
             (order_id,)
@@ -2825,9 +2760,6 @@ def api_admin_seller_eval():
             cur.close()
         if conn:
             conn.close()
-
-
-
 
 
 if __name__ == '__main__':

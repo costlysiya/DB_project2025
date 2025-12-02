@@ -9,14 +9,7 @@
 
     <div class="form-container wide">
 
-        <!-- (★) 폼 제출 로직이 AJAX(자바스크립트) 방식이므로 form의 action/method는 제거합니다. -->
         <form id="product-register-form">
-
-            <!--
-                (★) seller_id, listing_type은 세션에서 처리하므로
-                HTML에 숨겨둘 필요가 없습니다. (app.py에서 이미 처리 중)
-            -->
-
             <div class="form-group-section">
                 <h3>1. 굿즈 마스터 정보 (Product)</h3>
                 <div class="form-group">
@@ -76,10 +69,6 @@
                     <input type="number" id="stock" name="stock" required min="0" placeholder="0 이상의 재고 수량">
                 </div>
 
-                <!--
-                (★수정)
-                Reseller일 경우에만 2차 판매 필드와 경매 필드 섹션이 렌더링됩니다.
-                -->
                 {% if session.user_role == 'Reseller' %}
                 <div id="reseller-fields">
                     <div class="form-group">
@@ -107,7 +96,6 @@
                     </div>
                 </div>
 
-                <!-- (★수정) 경매 상세 정보 div를 Reseller IF 블록 안으로 이동 -->
                 <div id="auction-details" class="hidden">
                     <h3>3. 경매 상세 정보 (Auction)</h3>
                     <div class="form-group">
@@ -123,13 +111,12 @@
                         <input type="datetime-local" id="auction_end_date" name="auction_end_date">
                     </div>
                 </div>
-                {% endif %} <!-- (★수정) Reseller IF 블록을 여기서 닫습니다. -->
+                {% endif %}
 
             </div>
 
             <button type="submit" class="btn full-width submit-btn">상품 등록 완료</button>
 
-            <!-- (★신규) AJAX 응답 메시지를 표시할 div -->
             <div id="api-message" class="api-message" style="margin-top: 15px;"></div>
         </form>
     </div>
@@ -138,16 +125,14 @@
         document.addEventListener('DOMContentLoaded', function() {
             const isAuctionCheckbox = document.getElementById('is_auction');
             const auctionDetailsDiv = document.getElementById('auction-details');
-            // 재고 필드 요소를 가져옵니다.
             const stockInput = document.getElementById('stock');
 
             // isAuctionCheckbox가 Reseller가 아니면 null일 수 있으므로 체크
             if (isAuctionCheckbox) {
 
-                // 경매 상세 필드에서 제어할 항목들을 찾습니다.
+                // 경매 상세 필드에서 제어할 항목들을 찾음
                 const requiredAuctionInputs = auctionDetailsDiv.querySelectorAll('input, select');
 
-                // ⚠️ 경매 시작 가격 필드는 HTML에서 숨김 처리하거나, 여기서 항상 hidden 처리합니다.
                 const startPriceInput = document.getElementById('auction_start_price');
                 if (startPriceInput) {
                     startPriceInput.closest('.form-group').classList.add('hidden'); // HTML에서 숨기기
@@ -157,7 +142,7 @@
                 function toggleAuctionFields() {
                     const isChecked = isAuctionCheckbox.checked;
 
-                    // 경매 시작/종료 시간 필드 (auctionDetailsDiv)만 보이거나 숨깁니다.
+                    // 경매 시작/종료 시간 필드 (auctionDetailsDiv)만 보이거나 숨김
                     if (isChecked) {
                         stockInput.value = 1;
                         stockInput.min = 1;
@@ -166,8 +151,8 @@
                         auctionDetailsDiv.classList.remove('hidden');
 
                         // 경매 시작 및 종료 시간 필드에 required 속성 추가
-                        // startPriceInput은 이미 숨겨져 있으므로 제외하고 required를 적용해야 합니다.
-                        auctionDetailsDiv.querySelectorAll('input[type="datetime-local"]').forEach(input => {
+                        // startPriceInput은 이미 숨겨져 있으므로 제외하고 required를 적용해야 함
+                        auctionDetailsDiv.querySelectorAll('input[함ype="datetime-local"]').forEach(input => {
                             input.setAttribute('required', 'required');
                         });
 
