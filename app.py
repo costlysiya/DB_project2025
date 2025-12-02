@@ -3,8 +3,10 @@ import psycopg2
 from psycopg2 import extras
 import os
 import datetime
-from decimal import Decimal
+import uuid
 from werkzeug.utils import secure_filename
+from decimal import Decimal
+
 from typing import Optional, List
 from functools import wraps
 
@@ -118,7 +120,8 @@ def get_products_from_db(role=None, category=None, search_term=None, auction_onl
         sql_subquery = """
             (SELECT L.listing_id, 
                     L.listing_type, 
-                    L.price, 
+                    L.price,
+                    A.current_price, 
                     L.stock, 
                     L.condition, 
                     L.status,
@@ -1356,12 +1359,19 @@ def product_register():
 
         for file in uploaded_files:
             if file.filename:
-                # Flask의 static 폴더에 파일 저장
-                filename = secure_filename(file.filename)
-                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                # A. 원본 파일명에서 확장자를 안전하게 분리
+                original_filename = secure_filename(file.filename)
+                name, ext = os.path.splitext(original_filename)
+
+                # B. ✨ UUID를 사용하여 고유한 파일 이름 생성 (핵심) ✨
+                unique_id = uuid.uuid4().hex
+                unique_filename = f"{unique_id}_{name}_{seller_id}{ext}"  # 판매자 ID도 추가하여 고유성 강화
+
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
                 file.save(file_path)
-                # DB에 저장할 URL (static 경로)
-                uploaded_image_urls.append(url_for('static', filename=f'uploads/{filename}', _external=True))
+
+                # C. DB에 저장할 고유 URL 생성
+                uploaded_image_urls.append(url_for('static', filename=f'uploads/{unique_filename}', _external=True))
 
         product_id = None
         category_for_listing = category  # Listing 테이블에 들어갈 최종 카테고리
