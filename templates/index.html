@@ -70,7 +70,7 @@
                 {% if product.listing_status in ['경매 중', '경매 예정'] %}
                     <p class="product-price auction-price">현재가: {{ "{:,.0f}원".format(product.current_price or product.price) }}</p>
                 {% else %}
-                    <p class="product-price">{{ "{:,.0f}원".format(product.price) }}</p>
+                    <p class="product-price">{{ "{:,.0f}원".format(product.current_price or product.price) }}</p>
                 {% endif %}
 
                 <!-- 상태 표시 (품절 > 경매 > 리셀상태 > 등급 순으로 표시) -->
