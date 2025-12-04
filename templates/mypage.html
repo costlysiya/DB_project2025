@@ -238,6 +238,7 @@
                 <!--판매 내역(Seller)-->
                 {% if sales_orders %}
                     <p>총 {{ sales_orders | length }}건의 판매 내역이 있습니다.</p>
+                    <p>총 판매 금액은 {{ total_sales }}원 입니다.</p>
                     <table class="order-history-table">
                         <thead>
                             <tr>

@@ -122,13 +122,12 @@ def get_products_from_db(role=None, category=None, search_term=None, auction_onl
                     L.stock, 
                     L.condition, 
                     L.status,
-                    L.list_description as list_description,
                     P.product_id, 
                     P.name                              AS product_name, 
                     P.category, 
                     P.rating                            AS product_rating,
                     COALESCE(LI.image_url, P.image_url) AS image_url,
-                    SP.store_name                              AS seller_name, 
+                    SP.store_name                       AS seller_name, 
                     SP.grade                            AS seller_grade,
                     A.end_date, 
                     A.auction_id,
@@ -431,6 +430,40 @@ def get_sales_for_seller(user_id, role=None):
             conn.close()
         print(f"판매자 주문 내역 조회 중 오류 발생: {str(e)}")
         return []
+
+#판매자 본인 판매 상품 총 매줓 조회 함수
+def show_seller_sales(user_id, role=None):
+    conn = get_db_connection(role=role)
+
+    if not conn:
+        return "DB 연결 오류", 500
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute(
+            """
+            SELECT
+                COALESCE(SUM(O.total_price), 0) AS total_sales_amount
+            FROM
+                Orderb O
+            JOIN
+                Listing L ON O.listing_id = L.listing_id
+            WHERE
+                L.seller_id = %s and
+                O.status = %s;
+            """,
+            (user_id, '구매 확정',)
+        )
+        total_sales = cur.fetchone()['total_sales_amount']
+
+        cur.close()
+        return total_sales
+
+    except Exception as e:
+        conn.rollback()
+        print(f"판매자 매출 조회 오류: {e}")
+        return "판매자 매출 조회 중 오류 발생", 500
+    finally:
+        conn.close()
 
 #판매자 본인 등록 상품 조회 함수
 def get_my_products_list(user_id, role=None):
@@ -1129,6 +1162,7 @@ def show_mypage():
         template_data["orders"] = get_orders_for_buyer(user_id, 'all_status', role=db_role)
     elif current_view == 'sales' and user_role in ['PrimarySeller', 'Reseller']:
         template_data["sales_orders"] = get_sales_for_seller(user_id, role=db_role)
+        template_data["total_sales"] = show_seller_sales(user_id, role=db_role)
     elif current_view == 'my_products' and user_role in ['PrimarySeller', 'Reseller']:
         template_data["my_products"] = get_my_products_list(user_id, role=db_role)
     elif current_view == 'disputes' and user_role == 'Buyer':
