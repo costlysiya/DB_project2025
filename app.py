@@ -516,7 +516,7 @@ def get_my_products_list(user_id, role=None):
 
 # 장바구니 수량 계산 함수
 def calculate_cart_count(user_id, role=None):
-    #현재 사용자의 장바구니에 담긴 총 상품 개수를 계산합니다.
+    #현재 사용자의 장바구니에 담긴 총 상품 개수를 계산
     if not user_id:
         return 0
 
@@ -857,7 +857,7 @@ def show_product_detail(listing_id):
                 auction_data = cur.fetchone()
 
                 if auction_data:
-                    # 조회된 결과를 auction 변수에 딕셔너리로 담습니다.
+                    # 조회된 결과를 auction 변수에 딕셔너리로 담음
                     auction = dict(auction_data)
 
                     # 최고 입찰자 이름 조회 (선택 사항: 템플릿에서 bidder_name 사용 시)
@@ -872,7 +872,7 @@ def show_product_detail(listing_id):
                     else:
                         auction['highest_bidder_name'] = None
 
-                    # 현재 시간이 마감 시간을 초과했는지 DB에서 확인합니다.
+                    # 현재 시간이 마감 시간을 초과했는지 DB에서 확인
                     cur.execute("SELECT NOW() AT TIME ZONE 'KST' > %s", (auction['end_date'],))
                     is_auction_ended = cur.fetchone()[0]
 
@@ -894,7 +894,7 @@ def show_product_detail(listing_id):
                         cur.close()
                         conn.close()
 
-                        # DB 연결을 다시 엽니다. (새로운 트랜잭션 필요)
+                        # DB 연결 (새로운 트랜잭션 필요)
                         conn_finalize = get_db_connection(role='administrator_role')
                         if conn_finalize:
                             cur_finalize = conn_finalize.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -939,8 +939,8 @@ def show_product_detail(listing_id):
                                 cur_finalize.close()
                                 conn_finalize.close()
 
-                            # 원래 함수로 돌아와 최종 렌더링을 진행합니다.
-                            # is_auction_ended는 여전히 True입니다.
+                            # 원래 함수로 돌아와 최종 렌더링을 진행
+                            # is_auction_ended는 여전히 True
 
         return render_template(
             'product_detail.html',
@@ -1393,11 +1393,9 @@ def product_register():
 
         for file in uploaded_files:
             if file.filename:
-                # A. 원본 파일명에서 확장자를 안전하게 분리
                 original_filename = secure_filename(file.filename)
                 name, ext = os.path.splitext(original_filename)
 
-                # B. ✨ UUID를 사용하여 고유한 파일 이름 생성 (핵심) ✨
                 unique_id = uuid.uuid4().hex
                 unique_filename = f"{unique_id}_{name}_{seller_id}{ext}"  # 판매자 ID도 추가하여 고유성 강화
 
@@ -1441,17 +1439,6 @@ def product_register():
             if existing_product:
                 product_id = existing_product['product_id']
                 pass
-                # Product UPDATE 로직
-                # if description or master_image_url:
-                #     cur.execute(
-                #         """
-                #         UPDATE Product
-                #         SET description = COALESCE(%s, description),
-                #             image_url   = COALESCE(%s, image_url)
-                #         WHERE product_id = %s
-                #         """,
-                #         (description, master_image_url, product_id)
-                #     )
             else:
                 cur.execute(
                     """
@@ -1497,10 +1484,6 @@ def product_register():
         )
         listing_id = cur.fetchone()[0]
 
-        # if seller_role == 'Reseller' and description:
-        #     cur.execute(
-        #         "UPDATE Listing SET list_description WHERE listing_id = %s", (listing_id,)
-        #     )
 
         if seller_role == 'Reseller' and uploaded_image_urls:
             for i, img_url in enumerate(uploaded_image_urls):
@@ -2461,7 +2444,7 @@ def update_dispute_status():
 
         # 2. Dispute 테이블 상태 업데이트 (처리 중으로 변경 시 admin_id 할당)
         if new_dispute_status == '처리 중':
-            # '처리 전' 상태에서만 admin_id를 할당합니다.
+            # '처리 전' 상태에서만 admin_id를 할당
             cur.execute("SELECT admin_id FROM Dispute WHERE dispute_id = %s FOR UPDATE", (dispute_id,))
             current_admin_id = cur.fetchone()[0]
 

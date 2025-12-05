@@ -160,7 +160,7 @@
 
                     } else {
                         // 일반 판매 모드:
-                        // 1. 재고 제한을 풀고 초기화합니다.
+                        // 1. 재고 제한을 풀고 초기화.
                         stockInput.min = 0;
                         stockInput.max = 9999999;
                         stockInput.readOnly = false;
@@ -208,8 +208,6 @@
 
 
                     try {
-                        // ⚠️ [가장 중요] 헤더에서 'Content-Type': 'application/json'을 제거하고,
-                        // FormData 객체 자체를 body에 넣어 전송합니다.
                         const response = await fetch('/api/product_register', {
                             method: 'POST',
                             body: formData // FormData 객체 직접 전송
